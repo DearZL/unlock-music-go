@@ -8,15 +8,17 @@ import (
 	"strings"
 )
 
-// DumpLyrics reads the embedded lyrics from an MP3 or FLAC file and returns
-// the lyrics text. Returns an error if no lyrics are found or the format is
-// unsupported.
+// DumpLyrics reads the embedded lyrics from an MP3, FLAC, or OGG file and
+// returns the lyrics text. Returns an error if no lyrics are found or the
+// format is unsupported.
 func DumpLyrics(data []byte, ext string) (string, error) {
 	switch strings.ToLower(ext) {
 	case "mp3":
 		return dumpLyricsMP3(data)
 	case "flac":
 		return dumpLyricsFLAC(data)
+	case "ogg":
+		return dumpLyricsOGG(data)
 	default:
 		return "", fmt.Errorf("tag reading not supported for .%s", ext)
 	}
@@ -70,6 +72,62 @@ func dumpLyricsMP3(data []byte) (string, error) {
 		pos = dataEnd
 	}
 	return "", fmt.Errorf("no USLT (UNSYNCEDLYRICS) frame found in ID3v2 tag")
+}
+
+// dumpLyricsOGG finds the LYRICS= tag in an OGG/Vorbis or OGG/Opus comment header.
+func dumpLyricsOGG(data []byte) (string, error) {
+	pages, err := oggParsePages(data)
+	if err != nil {
+		return "", fmt.Errorf("ogg: %w", err)
+	}
+
+	for _, page := range pages {
+		if page.headerType&0x01 != 0 {
+			continue
+		}
+		b := page.body
+		var vcData []byte
+		switch {
+		case len(b) >= 7 && b[0] == 0x03 && string(b[1:7]) == "vorbis":
+			vcData = b[7:]
+		case len(b) >= 8 && string(b[0:8]) == "OpusTags":
+			vcData = b[8:]
+		default:
+			continue
+		}
+		return dumpLyricsFromVC(vcData)
+	}
+	return "", fmt.Errorf("ogg: no comment header found")
+}
+
+// dumpLyricsFromVC extracts the LYRICS= value from raw Vorbis Comment data.
+func dumpLyricsFromVC(data []byte) (string, error) {
+	if len(data) < 8 {
+		return "", fmt.Errorf("vorbis comment block too short")
+	}
+	vendorLen := int(binary.LittleEndian.Uint32(data[0:4]))
+	off := 4 + vendorLen
+	if off+4 > len(data) {
+		return "", fmt.Errorf("vorbis comment: vendor string truncated")
+	}
+	count := int(binary.LittleEndian.Uint32(data[off : off+4]))
+	off += 4
+	for i := 0; i < count; i++ {
+		if off+4 > len(data) {
+			break
+		}
+		cLen := int(binary.LittleEndian.Uint32(data[off : off+4]))
+		off += 4
+		if off+cLen > len(data) {
+			break
+		}
+		comment := string(data[off : off+cLen])
+		off += cLen
+		if strings.HasPrefix(strings.ToUpper(comment), "LYRICS=") {
+			return comment[7:], nil
+		}
+	}
+	return "", fmt.Errorf("no LYRICS field found in Vorbis Comment")
 }
 
 // dumpLyricsFLAC finds the LYRICS= comment in a FLAC Vorbis Comment block.

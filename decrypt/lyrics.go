@@ -5,8 +5,7 @@ package decrypt
 // Supported formats:
 //   mp3  → ID3v2.3 USLT (Unsynchronised Lyric) frame
 //   flac → Vorbis Comment block  LYRICS=<text>
-//
-// For both formats the implementation is self-contained (no external deps).
+//   ogg  → Vorbis Comment (inside OGG page)  LYRICS=<text>
 
 import (
 	"bytes"
@@ -25,7 +24,7 @@ func EmbedLyrics(audio []byte, ext, lyricsText string) ([]byte, error) {
 	case "flac":
 		return embedLyricsFLAC(audio, lyricsText)
 	case "ogg":
-		return embedLyricsFLAC(audio, lyricsText)
+		return embedLyricsOGG(audio, lyricsText)
 	default:
 		return nil, fmt.Errorf("lyrics embedding is not supported for .%s files", ext)
 	}
@@ -319,6 +318,325 @@ func flacVCAddLyrics(data []byte, lyrics string) ([]byte, error) {
 // flacVCBuild creates a minimal Vorbis Comment block with just a LYRICS entry.
 func flacVCBuild(lyrics string) []byte {
 	return flacVCSerialise("unlock-music-go", []string{"LYRICS=" + lyrics})
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// OGG / Vorbis Comment
+// ──────────────────────────────────────────────────────────────────────────────
+
+// oggPage holds a parsed OGG page.
+type oggPage struct {
+	headerType byte
+	granule    uint64
+	serial     uint32
+	seqno      uint32
+	lacing     []byte // segment table
+	body       []byte // page payload
+}
+
+// embedLyricsOGG adds (or replaces) the LYRICS= Vorbis Comment tag in an
+// OGG/Vorbis or OGG/Opus file.
+func embedLyricsOGG(audio []byte, lyrics string) ([]byte, error) {
+	pages, err := oggParsePages(audio)
+	if err != nil {
+		return nil, fmt.Errorf("ogg: %w", err)
+	}
+
+	// Find the comment header packet.
+	// It always starts on a non-continuation page whose body begins with
+	// 0x03+"vorbis" (Vorbis) or "OpusTags" (Opus).
+	commentFirst := -1
+	commentLast := -1
+	afterSeg := 0 // first segment index in commentLast NOT part of the comment packet
+	var commentPkt []byte
+
+	for i, page := range pages {
+		if page.headerType&0x01 != 0 {
+			continue // continuation page – packet cannot start here
+		}
+		b := page.body
+		if !((len(b) >= 7 && b[0] == 0x03 && string(b[1:7]) == "vorbis") ||
+			(len(b) >= 8 && string(b[0:8]) == "OpusTags")) {
+			continue
+		}
+		commentFirst = i
+
+		// Reassemble the comment packet (may span several pages).
+		var buf []byte
+		done := false
+		for j := i; j < len(pages) && !done; j++ {
+			p := pages[j]
+			bodyOff := 0
+			for si, segLen := range p.lacing {
+				buf = append(buf, p.body[bodyOff:bodyOff+int(segLen)]...)
+				bodyOff += int(segLen)
+				if segLen < 255 {
+					commentLast = j
+					afterSeg = si + 1
+					done = true
+					break
+				}
+			}
+		}
+		if !done {
+			return nil, errors.New("ogg: comment packet not terminated")
+		}
+		commentPkt = buf
+		break
+	}
+
+	if commentFirst < 0 {
+		return nil, errors.New("ogg: no comment header found")
+	}
+
+	// Modify the comment packet.
+	newPkt, err := oggModifyComment(commentPkt, lyrics)
+	if err != nil {
+		return nil, fmt.Errorf("ogg: %w", err)
+	}
+
+	// Segments in commentLast that follow the comment packet (start of next packet).
+	tailLacing, tailBody := oggPageTail(pages[commentLast], afterSeg)
+
+	// Build replacement page(s) for the modified comment packet.
+	ref := pages[commentFirst]
+	newPages := oggBuildPacketPages(newPkt, ref.serial, ref.seqno, ref.granule)
+
+	// Append post-comment tail to the last new page (if it fits), or add a new page.
+	if len(tailLacing) > 0 {
+		last := &newPages[len(newPages)-1]
+		if len(last.lacing)+len(tailLacing) <= 255 {
+			last.lacing = append(last.lacing, tailLacing...)
+			last.body = append(last.body, tailBody...)
+		} else {
+			newPages = append(newPages, oggPage{
+				headerType: 0x00,
+				granule:    pages[commentLast].granule,
+				serial:     ref.serial,
+				seqno:      ref.seqno + uint32(len(newPages)),
+				lacing:     tailLacing,
+				body:       tailBody,
+			})
+		}
+	}
+
+	// Adjust sequence numbers of all subsequent same-serial pages.
+	seqDelta := len(newPages) - (commentLast - commentFirst + 1)
+
+	var out bytes.Buffer
+	for i := 0; i < commentFirst; i++ {
+		out.Write(serialiseOggPage(pages[i]))
+	}
+	for _, p := range newPages {
+		out.Write(serialiseOggPage(p))
+	}
+	for i := commentLast + 1; i < len(pages); i++ {
+		p := pages[i]
+		if p.serial == ref.serial && seqDelta != 0 {
+			p.seqno = uint32(int(p.seqno) + seqDelta)
+		}
+		out.Write(serialiseOggPage(p))
+	}
+	return out.Bytes(), nil
+}
+
+// oggModifyComment returns a new comment header packet with a LYRICS tag added/replaced.
+func oggModifyComment(pkt []byte, lyrics string) ([]byte, error) {
+	var prefix, vcData []byte
+	vorbis := false
+	switch {
+	case len(pkt) >= 7 && pkt[0] == 0x03 && string(pkt[1:7]) == "vorbis":
+		prefix, vcData = pkt[:7], pkt[7:]
+		vorbis = true
+	case len(pkt) >= 8 && string(pkt[0:8]) == "OpusTags":
+		prefix, vcData = pkt[:8], pkt[8:]
+	default:
+		return nil, errors.New("not a comment header packet")
+	}
+	// Vorbis Comment binary format is identical to FLAC's; reuse the FLAC helper.
+	newVC, err := flacVCAddLyrics(vcData, lyrics)
+	if err != nil {
+		return nil, err
+	}
+	result := append(append([]byte{}, prefix...), newVC...)
+	if vorbis {
+		// Vorbis I spec §5.2.1 requires a framing bit (value 1) at the end of
+		// the comment header packet.  OpusTags has no such requirement.
+		result = append(result, 0x01)
+	}
+	return result, nil
+}
+
+// oggPageTail returns the lacing and body bytes of page p starting at segment index start.
+func oggPageTail(p oggPage, start int) (lacing []byte, body []byte) {
+	if start >= len(p.lacing) {
+		return nil, nil
+	}
+	off := 0
+	for _, s := range p.lacing[:start] {
+		off += int(s)
+	}
+	return p.lacing[start:], p.body[off:]
+}
+
+// oggBuildPacketPages encodes a single OGG packet into one or more pages.
+// The first page gets headerType 0x00; continuation pages get 0x01.
+func oggBuildPacketPages(pkt []byte, serial, firstSeqno uint32, granule uint64) []oggPage {
+	var pages []oggPage
+	offset := 0
+	seqno := firstSeqno
+	first := true
+
+	for {
+		var lacing []byte
+		bodyStart := offset
+
+		for len(lacing) < 255 {
+			remaining := len(pkt) - offset
+			if remaining == 0 {
+				if first { // empty packet: one zero-length terminating segment
+					lacing = append(lacing, 0)
+				}
+				break
+			}
+			seg := remaining
+			if seg > 255 {
+				seg = 255
+			}
+			lacing = append(lacing, byte(seg))
+			offset += seg
+			if seg < 255 {
+				break // packet terminated
+			}
+		}
+
+		// When packet length is an exact multiple of 255 we need a zero-length
+		// terminating segment to signal the end of the packet.
+		if offset == len(pkt) && len(lacing) > 0 && lacing[len(lacing)-1] == 255 {
+			if len(lacing) < 255 {
+				lacing = append(lacing, 0)
+			} else {
+				// Page is full (255 × 255 bytes). Flush it, then emit a
+				// single-segment terminating page.
+				ht := byte(0x00)
+				if !first {
+					ht = 0x01
+				}
+				pages = append(pages, oggPage{
+					headerType: ht, granule: granule, serial: serial,
+					seqno: seqno, lacing: lacing, body: pkt[bodyStart:offset],
+				})
+				seqno++
+				pages = append(pages, oggPage{
+					headerType: 0x01, granule: granule, serial: serial,
+					seqno: seqno, lacing: []byte{0}, body: nil,
+				})
+				return pages
+			}
+		}
+
+		ht := byte(0x00)
+		if !first {
+			ht = 0x01
+		}
+		pages = append(pages, oggPage{
+			headerType: ht, granule: granule, serial: serial,
+			seqno: seqno, lacing: lacing, body: pkt[bodyStart:offset],
+		})
+		seqno++
+		first = false
+
+		if offset >= len(pkt) {
+			break
+		}
+	}
+	return pages
+}
+
+// oggParsePages splits raw OGG data into a slice of pages.
+func oggParsePages(data []byte) ([]oggPage, error) {
+	var pages []oggPage
+	pos := 0
+	for pos < len(data) {
+		if pos+27 > len(data) {
+			return nil, errors.New("truncated page header")
+		}
+		if string(data[pos:pos+4]) != "OggS" {
+			return nil, fmt.Errorf("lost sync at offset %d", pos)
+		}
+		nseg := int(data[pos+26])
+		if pos+27+nseg > len(data) {
+			return nil, errors.New("truncated segment table")
+		}
+		lacing := make([]byte, nseg)
+		copy(lacing, data[pos+27:pos+27+nseg])
+		bodyLen := 0
+		for _, s := range lacing {
+			bodyLen += int(s)
+		}
+		headerLen := 27 + nseg
+		if pos+headerLen+bodyLen > len(data) {
+			return nil, errors.New("truncated page body")
+		}
+		body := make([]byte, bodyLen)
+		copy(body, data[pos+headerLen:pos+headerLen+bodyLen])
+		pages = append(pages, oggPage{
+			headerType: data[pos+5],
+			granule:    binary.LittleEndian.Uint64(data[pos+6:]),
+			serial:     binary.LittleEndian.Uint32(data[pos+14:]),
+			seqno:      binary.LittleEndian.Uint32(data[pos+18:]),
+			lacing:     lacing,
+			body:       body,
+		})
+		pos += headerLen + bodyLen
+	}
+	return pages, nil
+}
+
+// serialiseOggPage builds the raw bytes of a page and fills in the CRC checksum.
+func serialiseOggPage(p oggPage) []byte {
+	nseg := len(p.lacing)
+	headerLen := 27 + nseg
+	buf := make([]byte, headerLen+len(p.body))
+	copy(buf[0:4], "OggS")
+	buf[4] = 0 // stream structure version
+	buf[5] = p.headerType
+	binary.LittleEndian.PutUint64(buf[6:], p.granule)
+	binary.LittleEndian.PutUint32(buf[14:], p.serial)
+	binary.LittleEndian.PutUint32(buf[18:], p.seqno)
+	// buf[22:26] = 0  (CRC placeholder — must be zero during computation)
+	buf[26] = byte(nseg)
+	copy(buf[27:], p.lacing)
+	copy(buf[headerLen:], p.body)
+	crc := oggCRC32(buf)
+	binary.LittleEndian.PutUint32(buf[22:], crc)
+	return buf
+}
+
+// oggCRC32Table is the lookup table for the OGG CRC-32 (polynomial 0x04c11db7).
+var oggCRC32Table = func() [256]uint32 {
+	var t [256]uint32
+	for i := range t {
+		crc := uint32(i) << 24
+		for j := 0; j < 8; j++ {
+			if crc&0x80000000 != 0 {
+				crc = crc<<1 ^ 0x04c11db7
+			} else {
+				crc <<= 1
+			}
+		}
+		t[i] = crc
+	}
+	return t
+}()
+
+// oggCRC32 computes the OGG page checksum (no pre/post inversion, initial value 0).
+func oggCRC32(data []byte) uint32 {
+	var crc uint32
+	for _, b := range data {
+		crc = crc<<8 ^ oggCRC32Table[byte(crc>>24)^b]
+	}
+	return crc
 }
 
 // flacVCSerialise encodes vendor string + comment list into Vorbis Comment block data.

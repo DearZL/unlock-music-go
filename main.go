@@ -34,7 +34,7 @@ var encryptedExts = map[string]bool{
 // plainAudioExts is the set of plain (non-encrypted) audio formats that
 // support lyrics embedding (-embed-lyrics mode).
 var plainAudioExts = map[string]bool{
-	"mp3": true, "flac": true,
+	"mp3": true, "flac": true, "ogg": true,
 }
 
 // fileTask describes one file to process.

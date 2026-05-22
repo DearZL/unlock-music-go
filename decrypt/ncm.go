@@ -88,6 +88,9 @@ func DecryptNcm(data []byte) (*NcmResult, error) {
 		return nil, errors.New("ncm: key plain text too short")
 	}
 	keyRaw := plain[17:]
+	if len(keyRaw) == 0 {
+		return nil, errors.New("ncm: empty audio key")
+	}
 
 	keyBox := buildKeyBox(keyRaw)
 

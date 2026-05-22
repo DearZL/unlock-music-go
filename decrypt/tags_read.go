@@ -1,11 +1,12 @@
 package decrypt
 
-// tags_read.go — Read and dump tag fields from MP3/FLAC files for verification.
+// tags_read.go — Read and dump tag fields from MP3/FLAC/OGG files for verification.
 
 import (
 	"encoding/binary"
 	"fmt"
 	"strings"
+	"unicode/utf16"
 )
 
 // DumpLyrics reads the embedded lyrics from an MP3, FLAC, or OGG file and
@@ -60,18 +61,68 @@ func dumpLyricsMP3(data []byte) (string, error) {
 		if frameID == "USLT" && frameSize >= 5 {
 			fd := data[dataStart:dataEnd]
 			// fd: encoding(1) + language(3) + descriptor(null-terminated) + lyrics
-			descEnd := 4 // skip encoding + language
-			for descEnd < len(fd) && fd[descEnd] != 0x00 {
-				descEnd++
-			}
-			descEnd++ // skip the null terminator
-			if descEnd <= len(fd) {
-				return string(fd[descEnd:]), nil
+			lyricsStart := id3LyricsTextStart(fd)
+			if lyricsStart >= 0 && lyricsStart <= len(fd) {
+				return decodeID3Text(fd[0], fd[lyricsStart:]), nil
 			}
 		}
 		pos = dataEnd
 	}
 	return "", fmt.Errorf("no USLT (UNSYNCEDLYRICS) frame found in ID3v2 tag")
+}
+
+func id3LyricsTextStart(fd []byte) int {
+	if len(fd) < 5 {
+		return -1
+	}
+	encoding := fd[0]
+	pos := 4 // skip encoding + language
+	if encoding == 1 || encoding == 2 {
+		for pos+1 < len(fd) {
+			if fd[pos] == 0x00 && fd[pos+1] == 0x00 {
+				return pos + 2
+			}
+			pos += 2
+		}
+		return -1
+	}
+	for pos < len(fd) {
+		if fd[pos] == 0x00 {
+			return pos + 1
+		}
+		pos++
+	}
+	return -1
+}
+
+func decodeID3Text(encoding byte, data []byte) string {
+	switch encoding {
+	case 1:
+		if len(data) >= 2 {
+			switch {
+			case data[0] == 0xFF && data[1] == 0xFE:
+				return decodeUTF16Text(data[2:], binary.LittleEndian)
+			case data[0] == 0xFE && data[1] == 0xFF:
+				return decodeUTF16Text(data[2:], binary.BigEndian)
+			}
+		}
+		return decodeUTF16Text(data, binary.BigEndian)
+	case 2:
+		return decodeUTF16Text(data, binary.BigEndian)
+	default:
+		return string(data)
+	}
+}
+
+func decodeUTF16Text(data []byte, order binary.ByteOrder) string {
+	if len(data)%2 != 0 {
+		data = data[:len(data)-1]
+	}
+	codeUnits := make([]uint16, 0, len(data)/2)
+	for i := 0; i < len(data); i += 2 {
+		codeUnits = append(codeUnits, order.Uint16(data[i:i+2]))
+	}
+	return string(utf16.Decode(codeUnits))
 }
 
 // dumpLyricsOGG finds the LYRICS= tag in an OGG/Vorbis or OGG/Opus comment header.
@@ -81,23 +132,47 @@ func dumpLyricsOGG(data []byte) (string, error) {
 		return "", fmt.Errorf("ogg: %w", err)
 	}
 
-	for _, page := range pages {
+	for i, page := range pages {
 		if page.headerType&0x01 != 0 {
 			continue
 		}
 		b := page.body
-		var vcData []byte
+		var prefixLen int
 		switch {
 		case len(b) >= 7 && b[0] == 0x03 && string(b[1:7]) == "vorbis":
-			vcData = b[7:]
+			prefixLen = 7
 		case len(b) >= 8 && string(b[0:8]) == "OpusTags":
-			vcData = b[8:]
+			prefixLen = 8
 		default:
 			continue
 		}
-		return dumpLyricsFromVC(vcData)
+		pkt, err := oggReassemblePacket(pages, i)
+		if err != nil {
+			return "", err
+		}
+		return dumpLyricsFromVC(pkt[prefixLen:])
 	}
 	return "", fmt.Errorf("ogg: no comment header found")
+}
+
+func oggReassemblePacket(pages []oggPage, first int) ([]byte, error) {
+	var buf []byte
+	for j := first; j < len(pages); j++ {
+		p := pages[j]
+		bodyOff := 0
+		for _, segLen := range p.lacing {
+			end := bodyOff + int(segLen)
+			if end > len(p.body) {
+				return nil, fmt.Errorf("ogg: segment exceeds page body")
+			}
+			buf = append(buf, p.body[bodyOff:end]...)
+			bodyOff = end
+			if segLen < 255 {
+				return buf, nil
+			}
+		}
+	}
+	return nil, fmt.Errorf("ogg: comment packet not terminated")
 }
 
 // dumpLyricsFromVC extracts the LYRICS= value from raw Vorbis Comment data.

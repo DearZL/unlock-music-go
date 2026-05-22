@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"unicode/utf16"
 )
 
 // EmbedLyrics writes lyricsText into the audio bytes of the given format.
@@ -123,12 +124,12 @@ func id3v2BuildUSLT(language, lyrics string) []byte {
 	if len(language) < 3 {
 		language = "XXX"
 	}
-	// Frame data: encoding(1) + language(3) + content_descriptor(1 null) + lyrics
+	// Frame data: encoding(1) + language(3) + UTF-16 content descriptor + lyrics
 	var data bytes.Buffer
-	data.WriteByte(0x03)           // UTF-8
+	data.WriteByte(0x01)           // UTF-16 with BOM, compatible with ID3v2.3
 	data.WriteString(language[:3]) // 3-char language code
-	data.WriteByte(0x00)           // content descriptor (empty, null-terminated)
-	data.WriteString(lyrics)
+	data.Write([]byte{0x00, 0x00}) // empty UTF-16 descriptor, null-terminated
+	data.Write(utf16LEWithBOM(lyrics))
 
 	frameData := data.Bytes()
 
@@ -139,6 +140,16 @@ func id3v2BuildUSLT(language, lyrics string) []byte {
 	// flags: 0x00 0x00 (already zero)
 	copy(frame[10:], frameData)
 	return frame
+}
+
+func utf16LEWithBOM(s string) []byte {
+	encoded := utf16.Encode([]rune(s))
+	out := make([]byte, 2+len(encoded)*2)
+	out[0], out[1] = 0xFF, 0xFE
+	for i, r := range encoded {
+		binary.LittleEndian.PutUint16(out[2+i*2:], r)
+	}
+	return out
 }
 
 // encodeSyncsafe writes n as a 4-byte ID3v2 syncsafe integer into dst.
@@ -216,6 +227,9 @@ func embedLyricsFLAC(audio []byte, lyrics string) ([]byte, error) {
 
 	if vcBlockStart >= 0 {
 		// Reconstruct with replaced block.
+		if len(newVCData) > 0xFFFFFF {
+			return nil, errors.New("flac: vorbis comment block too large")
+		}
 		oldBlockSize := int(audio[vcBlockStart+1])<<16 |
 			int(audio[vcBlockStart+2])<<8 | int(audio[vcBlockStart+3])
 		oldHeader := audio[vcBlockStart]
@@ -243,6 +257,12 @@ func embedLyricsFLAC(audio []byte, lyrics string) ([]byte, error) {
 	firstHeader := audio[4]
 	firstBlockSize := int(audio[5])<<16 | int(audio[6])<<8 | int(audio[7])
 	firstBlockEnd := 8 + firstBlockSize
+	if firstBlockEnd > len(audio) {
+		return nil, errors.New("flac: first metadata block extends past end of file")
+	}
+	if len(newVCData) > 0xFFFFFF {
+		return nil, errors.New("flac: vorbis comment block too large")
+	}
 
 	// The new VC block is NOT last; the existing first block's is_last bit is cleared.
 	// Insert: [cleared first block] + [new VC block] + rest
@@ -261,10 +281,10 @@ func embedLyricsFLAC(audio []byte, lyrics string) ([]byte, error) {
 	var out bytes.Buffer
 	out.WriteString("fLaC")
 	out.WriteByte(newFirstHeader)
-	out.Write(audio[5 : 4+firstBlockEnd]) // rest of first block header + data
+	out.Write(audio[5:firstBlockEnd]) // rest of first block header + data
 	out.Write(vcHeader[:])
 	out.Write(newVCData)
-	out.Write(audio[4+firstBlockEnd:])
+	out.Write(audio[firstBlockEnd:])
 	return out.Bytes(), nil
 }
 

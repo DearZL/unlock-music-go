@@ -1,17 +1,17 @@
 # unlock-music-go
 
-一个用 Go 编写的命令行工具，用于解密中国各大流媒体平台（网易云音乐、QQ 音乐、酷狗音乐、酷我音乐、喜马拉雅等）的加密音乐文件，并可自动将 LRC 歌词嵌入解密后的音频标签。
+一个用 Go 编写的命令行工具，用于解密中国各大流媒体平台（网易云音乐、QQ 音乐、酷狗音乐、酷我音乐、喜马拉雅等）的加密音乐文件，并可按需将 LRC 歌词嵌入解密后的音频标签。
 
 ---
 
 ## 功能特性
 
 - 支持 30+ 种加密格式，覆盖主流中国音乐平台
-- 自动检测同目录下的 `.lrc` 歌词文件并嵌入音频标签（MP3 → ID3v2 USLT；FLAC / OGG → Vorbis Comment）
+- 可选检测同目录下的 `.lrc` 歌词文件并嵌入音频标签（MP3 → ID3v2 USLT；FLAC / OGG → Vorbis Comment）
 - 批量模式：递归处理整个目录树
 - 独立歌词嵌入模式：为未加密的 MP3、FLAC、OGG 文件写入歌词，无需解密
 - 支持正则表达式歌词匹配规则，使用 `{name}` 占位符
-- 自动识别并转换 GBK / UTF-16 编码的歌词文件为 UTF-8
+- 自动识别 UTF-8 / UTF-16 / GBK / GB18030 编码的歌词文件
 - 容错处理：单个文件失败不影响整批任务继续执行
 - 输出目录保留原始子目录结构
 
@@ -45,7 +45,7 @@
 
 ### 从源码编译
 
-**环境要求：Go 1.21+**
+**环境要求：Go 1.25+**
 
 ```bash
 git clone <仓库地址>
@@ -64,7 +64,7 @@ GOOS=windows GOARCH=amd64 go build -o unlock.exe .
 ## 使用方法
 
 ```
-unlock-music-go -i <文件或目录> [-o <输出目录>] [-lrc-pattern <正则>]
+unlock-music-go -i <文件或目录> [-o <输出目录>] [-with-lyrics] [-lrc-pattern <正则>]
 unlock-music-go -i <文件或目录> -embed-lyrics [-o <输出目录>] [-lrc-pattern <正则>]
 unlock-music-go -i <文件.mp3|flac|ogg> -dump-tags
 ```
@@ -76,6 +76,7 @@ unlock-music-go -i <文件.mp3|flac|ogg> -dump-tags
 | `-i` | （必填） | 输入文件或目录，目录会被递归遍历 |
 | `-o` | （与源文件同目录） | 输出目录，会镜像源目录的子目录结构 |
 | `-lrc-pattern` | `{name}\.lrc` | 歌词文件匹配的正则模板，`{name}` 会被替换为歌曲文件名（已转义），匹配不区分大小写 |
+| `-with-lyrics` | false | 解密模式下查找并嵌入匹配的 `.lrc` 歌词 |
 | `-embed-lyrics` | false | 启用歌词嵌入模式（不解密，仅写入歌词） |
 | `-dump-tags` | false | 打印 MP3、FLAC 或 OGG 文件中已嵌入的歌词内容，然后退出 |
 
@@ -83,7 +84,7 @@ unlock-music-go -i <文件.mp3|flac|ogg> -dump-tags
 
 ### 模式一：解密模式（默认）
 
-解密 `-i` 路径下所有支持的加密文件。对每个文件，会在**同目录**下按 `-lrc-pattern` 规则自动查找歌词文件，找到则自动嵌入。
+解密 `-i` 路径下所有支持的加密文件。默认只输出音频，不写入歌词。需要歌词时，加 `-with-lyrics`，程序会在**同目录**下按 `-lrc-pattern` 规则查找歌词文件，找到则嵌入。
 
 ```powershell
 # 解密单个文件
@@ -92,8 +93,11 @@ unlock.exe -i "周杰伦 - 最长的电影.mflac"
 # 批量解密整个目录，输出到 D:\output
 unlock.exe -i D:\Music -o D:\output
 
-# 使用宽松的歌词匹配规则
-unlock.exe -i D:\Music -o D:\output -lrc-pattern "{name}.*\.lrc"
+# 解密时写入歌词
+unlock.exe -i D:\Music -o D:\output -with-lyrics
+
+# 使用宽松的歌词匹配规则写入歌词
+unlock.exe -i D:\Music -o D:\output -with-lyrics -lrc-pattern "{name}.*\.lrc"
 ```
 
 ---
@@ -133,15 +137,15 @@ unlock.exe -i song.ogg -dump-tags
 
 **解密模式：**
 ```
-  OK    周杰伦 - 最长的电影.mflac  →  周杰伦 - 最长的电影.flac  [+lrc]
-  OK    烟把儿乐队 - 纸短情长.mgg  →  烟把儿乐队 - 纸短情长.ogg  [+lrc]
+  OK    周杰伦 - 最长的电影.mflac  →  周杰伦 - 最长的电影.flac
+  OK    烟把儿乐队 - 纸短情长.mgg  →  烟把儿乐队 - 纸短情长.ogg
   OK    song.ncm                   →  song.mp3
   FAIL  broken.qmc0
         └─ qmc: key derivation failed: ...
 
 ━━━ Summary ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   Total   : 4
-  Success : 3  (lyrics embedded: 2)
+  Success : 3
   Failed  : 1
     • broken.qmc0
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -166,13 +170,15 @@ unlock.exe -i song.ogg -dump-tags
 
 `-lrc-pattern` 是一个 Go 正则表达式，其中 `{name}` 会被替换为歌曲文件名（已对正则特殊字符转义）。匹配范围为完整文件名（含扩展名），不区分大小写。
 
+如果宽松规则匹配到多份歌词，程序会优先使用精确的 `歌曲名.lrc`；如果没有精确匹配，会跳过并提示，避免把翻译版、Live 版或其他同名前缀歌词误写进音频。
+
 | 规则 | 匹配示例 |
 |---|---|
 | `{name}\.lrc`（默认） | `周杰伦 - 晴天.lrc` |
 | `{name}[ ._-]*\.lrc` | `周杰伦 - 晴天.lrc`、`周杰伦 - 晴天_.lrc` |
 | `{name}.*\.lrc` | 任何以歌曲名开头的 `.lrc` 文件 |
 
-歌词文件编码支持：**UTF-8**（含 BOM）、**UTF-16 LE/BE**（含 BOM）、**GBK / GB18030**（Windows 上常见的中文编码，无 BOM），均会自动转换为 UTF-8 后再嵌入。
+歌词文件编码支持：**UTF-8**（含 BOM）、**UTF-16 LE/BE**（含 BOM）、**GBK / GB18030**（Windows 上常见的中文编码，无 BOM），均会自动解码为文本后再按目标音频标签格式嵌入。
 
 ---
 
@@ -180,13 +186,22 @@ unlock.exe -i song.ogg -dump-tags
 
 ```
 unlock-music-go/
-├── main.go          # 命令行入口，模式分发，任务编排
-├── encoding.go      # 歌词文件编码检测与 UTF-8 转换
+├── main.go          # 命令行入口与模式分发
+├── usage.go         # 命令行帮助文本
+├── main_test.go     # 命令行辅助逻辑测试
+├── types.go         # 顶层任务类型与支持的扩展名集合
+├── run_modes.go     # 解密模式与歌词嵌入模式的处理流程
+├── files.go         # 文件收集、歌词匹配、输出路径计算
+├── output.go        # 进度与汇总输出
+├── decrypt_dispatch.go # 加密格式到解密器的分发
+├── encoding.go      # 歌词文件编码检测与文本解码
+├── validate_ogg.go  # OGG 页面诊断工具（go:build ignore，不参与正常构建）
 ├── go.mod
 ├── go.sum
 └── decrypt/
     ├── detect.go    # 音频格式嗅探（SniffAudioExt）
     ├── lyrics.go    # 歌词嵌入：MP3（ID3v2 USLT）/ FLAC / OGG（Vorbis Comment）
+    ├── lyrics_test.go
     ├── tags_read.go # 读取 / 打印 MP3 / FLAC / OGG 中已嵌入的歌词
     ├── ncm.go       # 网易云音乐（.ncm）
     ├── ncmcache.go  # 网易云缓存（.uc）

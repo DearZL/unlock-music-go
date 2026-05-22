@@ -28,6 +28,9 @@ type QmcResult struct {
 // DecryptQmc decrypts a QQ Music file.
 // rawExt is the original file extension (e.g. "mflac", "qmc0") used for format hints.
 func DecryptQmc(data []byte, rawExt string) (*QmcResult, error) {
+	if len(data) < 4 {
+		return nil, errors.New("qmc: file too short")
+	}
 	d := &qmcDecoder{data: data, size: len(data)}
 	if err := d.searchKey(); err != nil {
 		return nil, err
@@ -91,9 +94,15 @@ func (d *qmcDecoder) searchKey() error {
 	}
 
 	if bytes.Equal(last4, []byte("QTag")) {
+		if d.size < 8 {
+			return errors.New("qmc: QTag file too short")
+		}
 		// QTag format: big-endian uint32 keySize at [-8..-5]
 		sizeView := d.data[d.size-8 : d.size-4]
 		keySize := int(binary.BigEndian.Uint32(sizeView))
+		if keySize <= 0 || keySize > d.size-8 {
+			return errors.New("qmc: invalid QTag key size")
+		}
 		d.audioSize = d.size - keySize - 8
 
 		rawKey := d.data[d.audioSize : d.size-8]
@@ -122,6 +131,9 @@ func (d *qmcDecoder) searchKey() error {
 	// Default: last 4 bytes are little-endian uint32 key size
 	keySize := int(binary.LittleEndian.Uint32(last4))
 	if keySize < 0x400 {
+		if keySize <= 0 || keySize > d.size-4 {
+			return errors.New("qmc: invalid key size")
+		}
 		d.audioSize = d.size - keySize - 4
 		rawKey := d.data[d.audioSize : d.size-4]
 		return d.setCipher(rawKey)

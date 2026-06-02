@@ -10,9 +10,11 @@ package decrypt
 //          4 bytes  – metadata length
 //          M bytes  – metadata (each byte XOR 0x63, skip first 22 bytes "163 key(Don't modify)",
 //                     base64-decode the rest, then AES-ECB META_KEY, result is "music:{json}" or "dj:{json}")
-//          5 bytes  – unknown / CRC padding
-//          4 bytes  – gap size
-//          4 bytes  – image size (we skip these entirely and just seek to audio)
+//          5 bytes  – CRC / image version padding
+//          4 bytes  – cover frame length
+//          4 bytes  – image data length
+//          I bytes  – image data
+//          padding  – cover frame padding, if any
 //          ...      – audio data (each byte XOR keyBox[i & 0xFF])
 
 import (
@@ -27,7 +29,7 @@ import (
 
 var (
 	ncmMagicHeader = []byte{0x43, 0x54, 0x45, 0x4E, 0x46, 0x44, 0x41, 0x4D}
-	ncmCoreKey     = []byte{0x68, 0x7a, 0x48, 0x52, 0x41, 0x6d, 0x73, 0x6f, 0x35, 0x6b, 0x49, 0x6e, 0x62, 0x61, 0x79, 0x57}
+	ncmCoreKey     = []byte{0x68, 0x7a, 0x48, 0x52, 0x41, 0x6d, 0x73, 0x6f, 0x35, 0x6b, 0x49, 0x6e, 0x62, 0x61, 0x78, 0x57}
 	ncmMetaKey     = []byte{0x23, 0x31, 0x34, 0x6C, 0x6A, 0x6B, 0x5F, 0x21, 0x5C, 0x5D, 0x26, 0x30, 0x55, 0x3C, 0x27, 0x28}
 )
 
@@ -51,6 +53,7 @@ type NcmResult struct {
 	Ext   string
 	Mime  string
 	Meta  NcmMeta
+	Cover []byte
 }
 
 // DecryptNcm decrypts a .ncm file and returns the raw audio bytes plus metadata.
@@ -141,27 +144,11 @@ func DecryptNcm(data []byte) (*NcmResult, error) {
 		offset += metaLen
 	}
 
-	// Skip CRC (4 bytes), unknown (1 byte), gap size (4 bytes), image data
-	// Layout after metadata: [CRC 4B][unknown 1B][gap_size 4B][gap_data gap_size B][image_size 4B][image_data image_size B]
-	// The original TS does: offset += view.getUint32(offset + 5, true) + 13
-	// which means: skip (5 bytes overhead) + getUint32 at offset+5 bytes + 13 total
-	// = skip 4(crc) + 1(?) + 4(imageSize) + imageSize + 4(gap?) = complicated.
-	// Re-reading original: offset += this.view.getUint32(this.offset + 5, true) + 13
-	// this.offset is current offset pointing to the CRC area.
-	// getUint32(offset+5, true) reads image size 4 bytes at offset+5.
-	// +13 = 5 (CRC+unknown) + 4 (imageSize field) + 4 (more padding?) ... let's decode:
-	// +5 skips [CRC 4B][? 1B] => reads image_size uint32 at that position
-	// +13 = advance past [CRC 4B][? 1B][image_size 4B][image_data ...]+[4 more bytes?]
-	// Actually: offset += imageSize + 13, where imageSize is at offset+5.
-	if offset+9 > len(data) {
-		return nil, errors.New("ncm: file too short (image header)")
+	cover, audioOffset, err := parseNcmCoverFrame(data, offset)
+	if err != nil {
+		return nil, err
 	}
-	imageSize := int(binary.LittleEndian.Uint32(data[offset+5 : offset+9]))
-	offset += imageSize + 13
-
-	if offset > len(data) {
-		return nil, errors.New("ncm: file too short (audio data)")
-	}
+	offset = audioOffset
 
 	// --- audio data: XOR with keyBox ---
 	audio := make([]byte, len(data)-offset)
@@ -180,7 +167,28 @@ func DecryptNcm(data []byte) (*NcmResult, error) {
 		Ext:   ext,
 		Mime:  AudioMimeType(ext),
 		Meta:  meta,
+		Cover: cover,
 	}, nil
+}
+
+func parseNcmCoverFrame(data []byte, offset int) ([]byte, int, error) {
+	if offset+13 > len(data) {
+		return nil, 0, errors.New("ncm: file too short (cover header)")
+	}
+	coverFrameLen := int(binary.LittleEndian.Uint32(data[offset+5 : offset+9]))
+	imageLen := int(binary.LittleEndian.Uint32(data[offset+9 : offset+13]))
+	if coverFrameLen < imageLen {
+		return nil, 0, errors.New("ncm: invalid cover frame length")
+	}
+	imageStart := offset + 13
+	imageEnd := imageStart + imageLen
+	audioOffset := offset + 13 + coverFrameLen
+	if imageEnd > len(data) || audioOffset > len(data) {
+		return nil, 0, errors.New("ncm: file too short (cover data)")
+	}
+	cover := make([]byte, imageLen)
+	copy(cover, data[imageStart:imageEnd])
+	return cover, audioOffset, nil
 }
 
 // buildKeyBox generates the 256-byte decryption key box (RC4-like KSA + PRGA).
@@ -228,6 +236,11 @@ func aesECBDecrypt(cipherText, key []byte) ([]byte, error) {
 	padLen := int(out[len(out)-1])
 	if padLen == 0 || padLen > blockSize {
 		return nil, errors.New("aes-ecb: invalid padding")
+	}
+	for _, b := range out[len(out)-padLen:] {
+		if int(b) != padLen {
+			return nil, errors.New("aes-ecb: invalid padding")
+		}
 	}
 	return out[:len(out)-padLen], nil
 }

@@ -39,7 +39,7 @@ func EmbedLyrics(audio []byte, ext, lyricsText string) ([]byte, error) {
 // Existing frames are preserved; any pre-existing USLT frames are removed first.
 func embedLyricsMP3(audio []byte, lyrics string) ([]byte, error) {
 	// Collect frames from existing ID3v2 tag (if any), excluding USLT.
-	existingFrames, tagEnd := id3v2ParseFrames(audio)
+	existingFrames, tagEnd := id3v2ParseFramesExcluding(audio, map[string]bool{"USLT": true})
 
 	// Build the new USLT frame.
 	usltFrame := id3v2BuildUSLT("XXX", lyrics)
@@ -76,6 +76,10 @@ func embedLyricsMP3(audio []byte, lyrics string) ([]byte, error) {
 // and the byte offset where the tag ends (so the raw audio data starts there).
 // If no ID3v2 tag is present, tagEnd = 0.
 func id3v2ParseFrames(data []byte) (frames [][]byte, tagEnd int) {
+	return id3v2ParseFramesExcluding(data, map[string]bool{"USLT": true})
+}
+
+func id3v2ParseFramesExcluding(data []byte, exclude map[string]bool) (frames [][]byte, tagEnd int) {
 	if len(data) < 10 || string(data[0:3]) != "ID3" {
 		return nil, 0
 	}
@@ -106,7 +110,7 @@ func id3v2ParseFrames(data []byte) (frames [][]byte, tagEnd int) {
 			break
 		}
 
-		if frameID != "USLT" { // skip existing lyric frames
+		if !exclude[frameID] {
 			raw := make([]byte, frameEnd-pos)
 			copy(raw, data[pos:frameEnd])
 			// Normalise frame size field to ID3v2.3 (big-endian, not syncsafe)
@@ -291,6 +295,10 @@ func embedLyricsFLAC(audio []byte, lyrics string) ([]byte, error) {
 // flacVCAddLyrics parses an existing Vorbis Comment block, removes any
 // existing LYRICS comment, adds the new one, and returns the rebuilt block data.
 func flacVCAddLyrics(data []byte, lyrics string) ([]byte, error) {
+	return flacVCAddOrReplace(data, "LYRICS", lyrics)
+}
+
+func flacVCAddOrReplace(data []byte, key, value string) ([]byte, error) {
 	if len(data) < 8 {
 		return nil, errors.New("flac: vorbis comment block too short")
 	}
@@ -314,7 +322,10 @@ func flacVCAddLyrics(data []byte, lyrics string) ([]byte, error) {
 		return nil, errors.New("flac: cannot read comment count")
 	}
 
-	// Read existing comments, skipping LYRICS=
+	key = strings.ToUpper(key)
+	prefix := key + "="
+
+	// Read existing comments, skipping the replaced key.
 	var kept []string
 	for i := uint32(0); i < commentCount; i++ {
 		var cLen uint32
@@ -324,13 +335,12 @@ func flacVCAddLyrics(data []byte, lyrics string) ([]byte, error) {
 		cData := make([]byte, cLen)
 		r.Read(cData) //nolint:errcheck
 		comment := string(cData)
-		if !strings.HasPrefix(strings.ToUpper(comment), "LYRICS=") {
+		if !strings.HasPrefix(strings.ToUpper(comment), prefix) {
 			kept = append(kept, comment)
 		}
 	}
 
-	// Add new LYRICS comment
-	kept = append(kept, "LYRICS="+lyrics)
+	kept = append(kept, key+"="+value)
 
 	return flacVCSerialise(string(vendor), kept), nil
 }
@@ -357,6 +367,10 @@ type oggPage struct {
 // embedLyricsOGG adds (or replaces) the LYRICS= Vorbis Comment tag in an
 // OGG/Vorbis or OGG/Opus file.
 func embedLyricsOGG(audio []byte, lyrics string) ([]byte, error) {
+	return oggModifyCommentTag(audio, "LYRICS", lyrics)
+}
+
+func oggModifyCommentTag(audio []byte, key, value string) ([]byte, error) {
 	pages, err := oggParsePages(audio)
 	if err != nil {
 		return nil, fmt.Errorf("ogg: %w", err)
@@ -410,7 +424,7 @@ func embedLyricsOGG(audio []byte, lyrics string) ([]byte, error) {
 	}
 
 	// Modify the comment packet.
-	newPkt, err := oggModifyComment(commentPkt, lyrics)
+	newPkt, err := oggModifyComment(commentPkt, key, value)
 	if err != nil {
 		return nil, fmt.Errorf("ogg: %w", err)
 	}
@@ -460,8 +474,8 @@ func embedLyricsOGG(audio []byte, lyrics string) ([]byte, error) {
 	return out.Bytes(), nil
 }
 
-// oggModifyComment returns a new comment header packet with a LYRICS tag added/replaced.
-func oggModifyComment(pkt []byte, lyrics string) ([]byte, error) {
+// oggModifyComment returns a new comment header packet with a comment added/replaced.
+func oggModifyComment(pkt []byte, key, value string) ([]byte, error) {
 	var prefix, vcData []byte
 	vorbis := false
 	switch {
@@ -474,7 +488,7 @@ func oggModifyComment(pkt []byte, lyrics string) ([]byte, error) {
 		return nil, errors.New("not a comment header packet")
 	}
 	// Vorbis Comment binary format is identical to FLAC's; reuse the FLAC helper.
-	newVC, err := flacVCAddLyrics(vcData, lyrics)
+	newVC, err := flacVCAddOrReplace(vcData, key, value)
 	if err != nil {
 		return nil, err
 	}

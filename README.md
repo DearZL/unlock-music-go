@@ -8,6 +8,7 @@
 
 - 支持 30+ 种加密格式，覆盖主流中国音乐平台
 - 可选检测同目录下的 `.lrc` 歌词文件并嵌入音频标签（MP3 → ID3v2 USLT；FLAC / OGG → Vorbis Comment）
+- NCM 解密会将容器内封面写回 MP3 / FLAC / OGG 输出标签
 - 批量模式：递归处理整个目录树
 - 独立歌词嵌入模式：为未加密的 MP3、FLAC、OGG 文件写入歌词，无需解密
 - 支持正则表达式歌词匹配规则，使用 `{name}` 占位符
@@ -34,6 +35,10 @@
 ### 歌词嵌入支持
 
 歌词可嵌入 **MP3**（ID3v2.3 `USLT` 帧）、**FLAC** 和 **OGG**（Vorbis Comment `LYRICS` 字段）。其他输出格式（M4A、WAV、APE）即使存在对应的 `.lrc` 文件，也不会嵌入歌词。
+
+### 封面保留
+
+NCM 容器中单独保存的专辑图片会在解密时写回支持的输出格式：MP3 写入 `APIC`，FLAC 写入 `PICTURE` metadata block，OGG 写入 `METADATA_BLOCK_PICTURE`。其他输出格式暂不主动写入封面；如果封面原本就在解密后的音频 payload 内，会随 payload 保留。
 
 ---
 
@@ -200,6 +205,8 @@ unlock-music-go/
 ├── go.sum
 └── decrypt/
     ├── detect.go    # 音频格式嗅探（SniffAudioExt）
+    ├── cover.go     # 封面嵌入：MP3（APIC）/ FLAC（PICTURE）/ OGG（METADATA_BLOCK_PICTURE）
+    ├── cover_test.go
     ├── lyrics.go    # 歌词嵌入：MP3（ID3v2 USLT）/ FLAC / OGG（Vorbis Comment）
     ├── lyrics_test.go
     ├── tags_read.go # 读取 / 打印 MP3 / FLAC / OGG 中已嵌入的歌词

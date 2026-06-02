@@ -12,8 +12,7 @@ func SniffAudioExt(buf []byte) string {
 		return "flac"
 	case bytes.HasPrefix(buf, []byte{0x4F, 0x67, 0x67, 0x53}): // OggS
 		return "ogg"
-	case bytes.HasPrefix(buf, []byte{0x00, 0x00, 0x00, 0x20}) ||
-		bytes.HasPrefix(buf, []byte{0x00, 0x00, 0x00, 0x1C}):
+	case len(buf) >= 8 && bytes.Equal(buf[4:8], []byte("ftyp")):
 		return "m4a"
 	case bytes.HasPrefix(buf, []byte{0x52, 0x49, 0x46, 0x46}): // RIFF
 		return "wav"

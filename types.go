@@ -7,7 +7,7 @@ var encryptedExts = map[string]bool{
 	"mflac": true, "mflac0": true,
 	"qmcflac": true, "qmcogg": true,
 	"qmc0": true, "qmc2": true, "qmc3": true, "qmc4": true, "qmc6": true, "qmc8": true,
-	"bkcmp3": true, "bkcm4a": true, "bkcflac": true, "bkcwav": true,
+	"bkcmp3": true, "bkcm4a": true, "mmp4": true, "bkcflac": true, "bkcwav": true,
 	"bkcape": true, "bkcogg": true, "bkcwma": true,
 	"tkm": true, "666c6163": true, "6d7033": true, "6f6767": true, "6d3461": true, "776176": true,
 	"cache": true,

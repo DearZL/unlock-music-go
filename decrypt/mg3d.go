@@ -22,6 +22,7 @@ import (
 )
 
 const mg3dSegmentSize = 0x20
+const mg3dKeySearchLimit = 0x140 * mg3dSegmentSize
 
 // Mg3dResult holds the decrypted audio bytes.
 type Mg3dResult struct {
@@ -37,7 +38,7 @@ func DecryptMg3d(data []byte) (*Mg3dResult, error) {
 	header := data[:0x100]
 	var decryptionKey []byte
 
-	for offset := mg3dSegmentSize; offset < mg3dSegmentSize*20; offset += mg3dSegmentSize {
+	for offset := mg3dSegmentSize; offset < mg3dKeySearchLimit; offset += mg3dSegmentSize {
 		if offset+mg3dSegmentSize > len(data) {
 			break
 		}

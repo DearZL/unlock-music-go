@@ -13,7 +13,11 @@ func decryptFile(data []byte, ext string) ([]byte, string, error) {
 		if err != nil {
 			return nil, "", err
 		}
-		return r.Audio, r.Ext, nil
+		audio, err := embedNcmCover(r.Audio, r.Ext, r.Cover)
+		if err != nil {
+			return nil, "", err
+		}
+		return audio, r.Ext, nil
 
 	case "uc":
 		audio := decrypt.DecryptNcmCache(data)
@@ -93,5 +97,17 @@ func decryptFile(data []byte, ext string) ([]byte, string, error) {
 
 	default:
 		return nil, "", fmt.Errorf("unsupported extension: .%s", ext)
+	}
+}
+
+func embedNcmCover(audio []byte, ext string, cover []byte) ([]byte, error) {
+	if len(cover) == 0 {
+		return audio, nil
+	}
+	switch ext {
+	case "mp3", "flac", "ogg":
+		return decrypt.EmbedCover(audio, ext, cover)
+	default:
+		return audio, nil
 	}
 }

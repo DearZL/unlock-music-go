@@ -61,6 +61,9 @@ func DecryptXm(data []byte) (*XmResult, error) {
 
 	audio := make([]byte, len(data)-0x10)
 	copy(audio, data[0x10:])
+	if dataOffset > len(audio) {
+		return nil, errors.New("xm: data offset exceeds audio payload")
+	}
 
 	for cur := dataOffset; cur < len(audio); cur++ {
 		audio[cur] = (audio[cur] - key) ^ 0xFF

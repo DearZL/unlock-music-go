@@ -1,5 +1,7 @@
 package decrypt
 
+import "errors"
+
 // tm.go — QQ Music iOS cache (.tm2 / .tm6) decryption
 //
 // The file is essentially an M4A (MP4 container) where the first 8 bytes
@@ -16,6 +18,9 @@ type TmResult struct {
 
 // DecryptTm restores a .tm2/.tm6 file to a valid M4A.
 func DecryptTm(data []byte) (*TmResult, error) {
+	if len(data) < len(tmHeader) {
+		return nil, errors.New("tm: file too short")
+	}
 	audio := make([]byte, len(data))
 	copy(audio, data)
 	// Restore first 8 bytes

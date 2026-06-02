@@ -126,6 +126,9 @@ func DecryptKgm(data []byte, isVpr bool) (*KgmResult, error) {
 	}
 
 	headerLen := int(binary.LittleEndian.Uint32(data[0x10:0x14]))
+	if headerLen < 0x2C {
+		return nil, errors.New("kgm: invalid header length")
+	}
 	if headerLen > len(data) {
 		return nil, errors.New("kgm: header length exceeds file size")
 	}

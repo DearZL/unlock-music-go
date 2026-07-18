@@ -152,7 +152,10 @@ func DecryptQQMusicEx(data []byte, rawExt string, options QQMusicOptions) (*QmcR
 		return nil, err
 	}
 
-	return qqMusicDecryptPayload(installDir, data[:info.DataLength], rawExt, ekey)
+	// The stream decoder is now reproduced by the native Go QMC Map/RC4
+	// implementations.  installDir remains necessary here only for ordinal 12,
+	// which derives the local MMKV cache key.
+	return decryptQQMusicPayloadPure(data[:info.DataLength], rawExt, ekey)
 }
 
 func resolveQQMusicInstallDir(configured string) (string, error) {
@@ -245,4 +248,31 @@ func findQQMusicEKey(mmkvPlain []byte, innerName string) (string, error) {
 	}
 	match := matches[bestIndex]
 	return string(mmkvPlain[match[0]:match[1]]), nil
+}
+
+// decryptQQMusicPayloadPure applies the current QQ Music QMC stream using the
+// ekey stored in Checkccae.dat.
+func decryptQQMusicPayloadPure(payload []byte, rawExt, ekey string) (*QmcResult, error) {
+	keyDec, err := QmcDeriveKey([]byte(ekey))
+	if err != nil {
+		return nil, fmt.Errorf("qqmusic/musicex: derive payload key: %w", err)
+	}
+
+	audio := append([]byte(nil), payload...)
+	var stream QmcStreamCipher
+	if len(keyDec) > 300 {
+		stream = NewQmcRC4Cipher(keyDec)
+	} else {
+		stream = NewQmcMapCipher(keyDec)
+	}
+	stream.Decrypt(audio, 0)
+	if !HasKnownAudioMagic(audio) {
+		return nil, errors.New("qqmusic/musicex: decrypted data has no recognised audio header; key or format version changed")
+	}
+
+	ext := SniffAudioExt(audio)
+	if ext == "mp3" {
+		ext = qmcExtHint(rawExt)
+	}
+	return &QmcResult{Audio: audio, Ext: ext, Mime: AudioMimeType(ext)}, nil
 }

@@ -163,13 +163,22 @@ func NewQmcRC4Cipher(key []byte) *QmcRC4Cipher {
 
 func (c *QmcRC4Cipher) getSegmentKey(id int) int {
 	seed := int(c.key[id%c.n])
-	idx := int(math.Floor(float64(c.hash) / float64((id+1)*seed) * 100.0))
-	return idx % c.n
+	idx := uint64(math.Floor(float64(c.hash) / float64((id+1)*seed) * 100.0))
+	return int(idx % uint64(c.n))
+}
+
+// getFirstSegmentKey is the desktop decoder's special 1-based key selection
+// for bytes [0, 0x80).  The divisor uses positions 1..128 while the seed is
+// selected from the preceding zero-based key index.
+func (c *QmcRC4Cipher) getFirstSegmentKey(position int) int {
+	seed := int(c.key[(position-1)%c.n])
+	idx := uint64(math.Floor(float64(c.hash) / float64(position*seed) * 100.0))
+	return int(idx % uint64(c.n))
 }
 
 func (c *QmcRC4Cipher) encFirstSegment(buf []byte, offset int) {
 	for i := range buf {
-		buf[i] ^= c.key[c.getSegmentKey(offset+i)]
+		buf[i] ^= c.key[c.getFirstSegmentKey(offset+i+1)]
 	}
 }
 

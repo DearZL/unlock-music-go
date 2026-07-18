@@ -11,7 +11,7 @@ func usage() {
 
 用法
   解密模式（默认）：
-  unlock-music-go -i <文件或目录> [-o <输出目录>] [-with-lyrics] [-lrc-pattern <正则>]
+  unlock-music-go -i <文件或目录> [-o <输出目录>] [-with-lyrics=<true|false>] [-lrc-pattern <正则>]
                   [-qqmusic-mmkv <Checkccae.dat>]
 
   写入歌词模式：
@@ -21,8 +21,9 @@ func usage() {
     unlock-music-go -i <file.mp3|flac|ogg> -dump-tags
 
 模式说明
-  （默认）        解密加密音乐文件。默认不写入歌词。
-                 如需在解密后查找同目录 .lrc 并写入，请加 -with-lyrics。
+  （默认）        解密加密音乐文件，并默认查找同目录 .lrc 写入标签。
+                 未找到匹配歌词时仍输出音频，Summary 会汇总歌词结果。
+                 仅输出音频：-with-lyrics=false。
 
   -embed-lyrics  给已有 MP3/FLAC/OGG 文件写入歌词，不执行解密。
                  适用于已经是明文音频但希望补充歌词标签的场景。
@@ -43,7 +44,7 @@ func usage() {
     示例：{name}[ ._-]*\.lrc
     示例：{name}.*\.lrc
 
-  若未找到歌词文件，不报错，继续处理。
+  解密模式下若未找到歌词文件，不报错，继续输出音频。
   若宽松规则匹配到多份歌词且没有精确的“歌曲名.lrc”，会跳过并提示，避免误写。
 
 输出
@@ -62,7 +63,8 @@ func usage() {
 示例
   unlock-music-go -i song.mflac
   unlock-music-go -i ./Music -o ./output
-  unlock-music-go -i ./Music -with-lyrics -lrc-pattern "{name}.*\.lrc"
+  unlock-music-go -i ./Music -lrc-pattern "{name}.*\.lrc"
+  unlock-music-go -i ./Music -with-lyrics=false
   unlock-music-go -i ./Music -embed-lyrics
   unlock-music-go -i ./Music -embed-lyrics -o ./output -lrc-pattern "{name}.*\.lrc"
   unlock-music-go -i song.mp3 -dump-tags

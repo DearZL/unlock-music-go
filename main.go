@@ -17,7 +17,7 @@ func main() {
 	lrcPattern := flag.String("lrc-pattern", `{name}\.lrc`, "Regex template for lyrics detection; {name} = song base name")
 	dumpTags := flag.Bool("dump-tags", false, "Print embedded lyrics from a decoded MP3/FLAC/OGG file, then exit")
 	embedLyrics := flag.Bool("embed-lyrics", false, "Embed lyrics into plain (already-decoded) MP3/FLAC/OGG files")
-	withLyrics := flag.Bool("with-lyrics", false, "In decrypt mode, find a matching .lrc file and embed it into the decoded audio")
+	withLyrics := flag.Bool("with-lyrics", true, "In decrypt mode, find a matching .lrc file and embed it into the decoded audio (default: true)")
 	qqMusicMMKV := flag.String("qqmusic-mmkv", "", "Path to QQ Music Checkccae.dat (needed only for recent musicex downloads)")
 	flag.Usage = usage
 	flag.Parse()

@@ -37,6 +37,22 @@ func TestTaskFailedControlsProcessStatus(t *testing.T) {
 	}
 }
 
+func TestSummarizeDecryptLyrics(t *testing.T) {
+	summary := summarizeResults([]taskResult{
+		{src: "embedded.mflac", lrcSrc: "embedded.lrc"},
+		{src: "missing.mflac", lrcMissing: true},
+		{src: "warning.mflac", lrcSrc: "warning.lrc", lrcErr: errors.New("write tag")},
+		{src: "failed.mflac", decryptErr: errors.New("decode")},
+	}, false)
+
+	if summary.success != 3 || summary.failed != 1 {
+		t.Fatalf("success=%d failed=%d", summary.success, summary.failed)
+	}
+	if summary.lyricsEmbedded != 1 || summary.lyricsMissing != 1 || summary.lyricsWarnings != 1 {
+		t.Fatalf("lyrics=%+v", summary)
+	}
+}
+
 func TestFindLyricsRejectsAmbiguousLooseMatches(t *testing.T) {
 	dir := t.TempDir()
 	mustWrite(t, filepath.Join(dir, "Song live.lrc"), "live")

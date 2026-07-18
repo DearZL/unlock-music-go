@@ -38,6 +38,7 @@ type taskResult struct {
 	lrcSrc     string // lyrics file used, empty if none
 	decryptErr error
 	lrcErr     error // non-nil only when a lyrics file was found but embedding failed
+	lrcMissing bool  // decrypt mode: lyrics lookup completed without a matching file
 	writeErr   error
 	skipped    bool // embed-lyrics mode: no matching .lrc found, file was skipped
 }

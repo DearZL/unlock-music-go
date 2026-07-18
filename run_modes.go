@@ -33,7 +33,7 @@ func runDecryptMode(inputPath, outputDir, lrcPattern string, withLyrics bool, qq
 		results = append(results, r)
 		printProgress(r)
 	}
-	return printSummary(results, false)
+	return printSummary(results, false, withLyrics)
 }
 
 // processDecryptFile decrypts one file, optionally embeds lyrics, and writes the result.
@@ -61,6 +61,8 @@ func processDecryptFile(task fileTask, outputDir, lrcPattern string, withLyrics 
 		} else if lrcPath != "" {
 			r.lrcSrc = lrcPath
 			audio = embedLyricsInto(audio, outExt, lrcPath, &r.lrcErr)
+		} else {
+			r.lrcMissing = true
 		}
 	}
 
@@ -101,7 +103,7 @@ func runEmbedMode(inputPath, outputDir, lrcPattern string) bool {
 		results = append(results, r)
 		printProgress(r)
 	}
-	return printSummary(results, true)
+	return printSummary(results, true, true)
 }
 
 // processEmbedFile embeds lyrics into a plain (already-decoded) audio file.

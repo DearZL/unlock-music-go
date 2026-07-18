@@ -7,7 +7,7 @@ import (
 )
 
 func usage() {
-	fmt.Fprint(os.Stderr, `unlock-music-go —— 批量解密音乐文件并可选写入歌词
+	fmt.Fprint(os.Stderr, `unlock-music-go（Windows）—— 批量解密音乐文件并可选写入歌词
 
 用法
   解密模式（默认）：

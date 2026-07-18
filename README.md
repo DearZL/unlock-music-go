@@ -1,12 +1,12 @@
 # unlock-music-go
 
-Go 编写的命令行音乐文件解密工具，覆盖网易云、QQ 音乐、酷狗、酷我、喜马拉雅和咪咕的常见加密格式，并支持为 MP3、FLAC、OGG 写入或读取 LRC 歌词标签。
+面向 Windows 的 Go 命令行音乐文件解密工具，覆盖网易云、QQ 音乐、酷狗、酷我、喜马拉雅和咪咕的常见加密格式，并支持为 MP3、FLAC、OGG 写入或读取 LRC 歌词标签。
 
 ## 特性
 
 - 支持 30+ 种加密文件扩展名。
 - 支持 QQ Music desktop 当前 `musicex` 下载格式，完整链路为纯 Go。
-- 新版 `musicex` 支持 Windows `amd64` 和 `386`；不加载 `CommonFunction.dll`，不依赖 QQ Music 安装目录。
+- 仅支持 Windows；新版 `musicex` 支持 Windows `amd64` 和 `386`，不加载 `CommonFunction.dll`，不依赖 QQ Music 安装目录。
 - 自动读取本机 `%APPDATA%\Tencent\QQMusic\Checkccae.dat`，也支持 `-qqmusic-mmkv` 指定缓存文件。
 - 解密时默认匹配 LRC 并写入 MP3 `USLT`、FLAC / OGG `LYRICS` 标签；无匹配文件保持音频输出并在 Summary 汇总。
 - NCM 解密会将容器中的封面写回 MP3、FLAC、OGG 输出文件。
@@ -70,7 +70,7 @@ flowchart LR
 
 ## 构建
 
-要求 Go 1.25+。
+要求 Windows 10/11 与 Go 1.25+。项目直接调用 Windows 网络、注册表、物理磁盘 API 来派生 `Checkccae.dat` 的 device key，构建与运行目标均为 Windows。
 
 ```powershell
 git clone <仓库地址>
@@ -166,7 +166,6 @@ unlock-music-go/
     ├── musicex_cache.go     # Checkccae.dat、AES-CFB、ekey 匹配
     ├── musicex_payload.go   # 纯 Go QMC Map/RC4 payload 解密
     ├── mmkv_device_windows.go # Windows 设备标识与 MMKV key 纯 Go 推导
-    ├── mmkv_device_stub.go  # 非 Windows 构建提示
     ├── qmc.go / qmc_key.go / qmc_cipher.go # QQ QMC 与密钥派生
     ├── ncm*.go              # 网易云解密与缓存
     ├── kgm.go / kwm.go / tm.go / xm.go / ximalaya.go / mg3d.go

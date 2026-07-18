@@ -12,6 +12,30 @@
 - NCM 解密会将容器中的封面写回 MP3、FLAC、OGG 输出文件。
 - 目录输入会递归处理并保留原始子目录结构；存在失败文件时进程返回码为 `1`。
 
+## 运行总览
+
+```mermaid
+flowchart LR
+    A[📁 输入文件或目录] --> B[🔎 扩展名与容器检测]
+    B --> C{解密器分发}
+    C -->|QQ Music musicex| D[纯 Go: container → device → cache → payload]
+    C -->|其他已支持格式| E[对应字节级解密器]
+    D --> F[🎵 音频头识别]
+    E --> F
+    F --> G{默认歌词开启?}
+    G -->|是| H[🔤 匹配并嵌入 LRC]
+    G -->|否| I[💾 写入音频]
+    H --> I
+    I --> J[📊 Summary 汇总]
+
+    classDef entry fill:#1d4ed8,stroke:#93c5fd,color:#fff;
+    classDef core fill:#0f766e,stroke:#5eead4,color:#fff;
+    classDef output fill:#7c3aed,stroke:#c4b5fd,color:#fff;
+    class A,J entry;
+    class B,C,D,E,F,G,H core;
+    class I output;
+```
+
 ## 支持格式
 
 | 平台 | 扩展名 |
@@ -41,13 +65,37 @@
 ### 解密链路
 
 ```mermaid
-flowchart LR
-  A[musicex 文件] --> B[container: footer / version / 内部文件名]
-  B --> C[device: PCI MAC + 系统盘 identity]
-  C --> D[cache: 解密 Checkccae.dat]
-  D --> E[按内部文件名匹配 EncV2 ekey]
-  E --> F[payload: Go QMC Map/RC4 流]
-  F --> G[音频头校验与输出扩展名]
+flowchart TB
+    A[🎼 musicex 文件] --> B
+
+    subgraph Container["① Container · 文件自身"]
+        B[footer magic] --> C[version = 1]
+        C --> D[UTF-16LE 内部文件名]
+    end
+
+    subgraph Device["② Device · 当前 Windows 主机"]
+        E[PCI MAC] --> G[device key]
+        F[系统盘序列号 / 型号 / 固件] --> G
+    end
+
+    subgraph Cache["③ Cache · Checkccae.dat"]
+        H[AES-CFB 解码] --> I[EncV2 记录]
+        I --> J[内部文件名匹配 ekey]
+    end
+
+    subgraph Payload["④ Payload · 纯 Go 流解密"]
+        K[QMC Map / RC4] --> L[音频头识别]
+    end
+
+    D --> J
+    G --> H
+    J --> K
+    L --> M[✨ FLAC / MP3 / OGG / M4A / WAV / APE]
+
+    classDef stage fill:#0f172a,stroke:#38bdf8,color:#f8fafc;
+    classDef result fill:#14532d,stroke:#86efac,color:#fff;
+    class B,C,D,E,F,G,H,I,J,K,L stage;
+    class A,M result;
 ```
 
 | 环节 | Windows x64 |
@@ -144,6 +192,30 @@ go build -o .\unlock-music-go.exe .
 
 ### 歌词规则与标签
 
+```mermaid
+flowchart LR
+    A[🎵 已解密音频] --> B[按歌曲名查找 LRC]
+    B --> C{匹配结果}
+    C -->|精确或唯一匹配| D[读取歌词文件]
+    C -->|没有匹配| E[保留音频输出]
+    C -->|多个宽松匹配| F[跳过，避免误写]
+    D --> G[编码识别: UTF-8 / UTF-16 / GBK / GB18030]
+    G --> H{输出格式}
+    H -->|MP3| I[ID3: ULT / USLT]
+    H -->|FLAC| J[Vorbis Comment: LYRICS]
+    H -->|OGG| K[Vorbis / Opus Comment: LYRICS]
+    I --> L[💾 输出]
+    J --> L
+    K --> L
+    E --> L
+    F --> L
+
+    classDef decision fill:#92400e,stroke:#fcd34d,color:#fff;
+    classDef tag fill:#5b21b6,stroke:#c4b5fd,color:#fff;
+    class C,H decision;
+    class I,J,K tag;
+```
+
 `-lrc-pattern` 是不区分大小写的 Go 正则模板；`{name}` 替换为歌曲名。解密模式默认启用歌词查找：没有匹配的 LRC 时音频照常写出，Summary 的 `Lyrics` 行会记录 `missing` 数量。多个宽松匹配结果且不存在精确 `歌曲名.lrc` 时，该文件会跳过歌词写入，避免误写其他版本歌词。
 
 | 音频格式 | 写入位置 |
@@ -184,6 +256,33 @@ unlock-music-go/
 
 当前架构与维护范围匹配：CLI、任务编排、输出汇总和字节级解密职责分离；`musicex` 的容器、设备、缓存、payload 边界清晰；其余平台解密器保持独立文件。现阶段维持该结构，无需继续拆分目录或引入新的抽象层。
 
+```mermaid
+flowchart TB
+    CLI[main.go · flags] --> Modes[run_modes.go · 运行模式]
+    Modes --> Tasks[files.go · 任务收集与歌词查找]
+    Tasks --> Dispatch[decrypt_dispatch.go · 格式分发]
+    Dispatch --> Crypto[decrypt/ · 容器与密码流]
+    Crypto --> Tags[lyrics.go / cover.go · 元数据]
+    Tags --> Output[output.go · 进度与 Summary]
+
+    subgraph QQ["QQ Music musicex"]
+        Container[musicex_container.go]
+        DeviceKey[mmkv_device_windows.go]
+        MMKV[musicex_cache.go]
+        Stream[musicex_payload.go]
+        Container --> MMKV
+        DeviceKey --> MMKV
+        MMKV --> Stream
+    end
+
+    Crypto -. musicex .-> Container
+
+    classDef layer fill:#172554,stroke:#60a5fa,color:#fff;
+    classDef qq fill:#134e4a,stroke:#5eead4,color:#fff;
+    class CLI,Modes,Tasks,Dispatch,Crypto,Tags,Output layer;
+    class Container,DeviceKey,MMKV,Stream qq;
+```
+
 ### 解密结果示例
 
 ```text
@@ -198,6 +297,19 @@ unlock-music-go/
 ```
 
 ## 验证
+
+```mermaid
+flowchart LR
+    A[🧪 go test] --> B[🔍 go vet]
+    B --> C[🎼 真实 musicex 解密]
+    C --> D[🔖 音频头与歌词标签检查]
+    D --> E[✅ 可提交版本]
+
+    classDef check fill:#1e3a8a,stroke:#93c5fd,color:#fff;
+    classDef done fill:#166534,stroke:#86efac,color:#fff;
+    class A,B,C,D check;
+    class E done;
+```
 
 ```powershell
 # Windows x64

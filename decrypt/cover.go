@@ -42,11 +42,6 @@ func embedCoverMP3(audio, image []byte) ([]byte, error) {
 	return id3WriteTag(tag.major, tag.frames, audio[tag.audioOffset:])
 }
 
-func id3v2BuildAPIC(mime string, image []byte) []byte {
-	frame, _ := id3v2BuildAPICForVersion(3, mime, image)
-	return frame
-}
-
 func id3v2BuildAPICForVersion(major byte, mime string, image []byte) ([]byte, error) {
 	if major == 2 {
 		var data bytes.Buffer

@@ -136,37 +136,6 @@ func dumpLyricsOGG(data []byte) (string, error) {
 	}
 }
 
-func oggReassemblePacket(pages []oggPage, first int) ([]byte, error) {
-	if first < 0 || first >= len(pages) {
-		return nil, fmt.Errorf("ogg: invalid first page")
-	}
-	serial := pages[first].serial
-	var buf []byte
-	started := false
-	for _, p := range pages[first:] {
-		if p.serial != serial {
-			continue
-		}
-		if !started && p.headerType&0x01 != 0 {
-			return nil, fmt.Errorf("ogg: packet starts on a continuation page")
-		}
-		started = true
-		bodyOff := 0
-		for _, segLen := range p.lacing {
-			end := bodyOff + int(segLen)
-			if end > len(p.body) {
-				return nil, fmt.Errorf("ogg: segment exceeds page body")
-			}
-			buf = append(buf, p.body[bodyOff:end]...)
-			bodyOff = end
-			if segLen < 255 {
-				return buf, nil
-			}
-		}
-	}
-	return nil, fmt.Errorf("ogg: packet not terminated")
-}
-
 // dumpLyricsFromVC extracts the LYRICS= value from raw Vorbis Comment data.
 func dumpLyricsFromVC(data []byte) (string, error) {
 	_, comments, err := parseVorbisComment(data)

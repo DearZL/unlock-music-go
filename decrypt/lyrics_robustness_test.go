@@ -95,6 +95,9 @@ func TestEmbedLyricsMP3NormalisesTagWideUnsynchronisation(t *testing.T) {
 	if len(parsed.frames) < 2 || !bytes.Contains(parsed.frames[0], []byte{0xff, 0xe0}) {
 		t.Fatal("retained frame was not de-unsynchronised")
 	}
+	if !bytes.HasSuffix(out, []byte{0xff, 0xfb, 0x90, 0x64}) {
+		t.Fatal("MP3 audio payload was changed")
+	}
 }
 
 func TestEmbedLyricsMP3RejectsTruncatedExtendedHeader(t *testing.T) {
@@ -116,7 +119,7 @@ func TestEmbedCoverMP3UsesV22PICFrame(t *testing.T) {
 }
 
 func TestEmbedLyricsOGGFindsCommentAfterAnotherPacket(t *testing.T) {
-	comment := append([]byte("OpusTags"), flacVCSerialise("vendor", []string{"TITLE=song"})...)
+	comment := append([]byte("OpusTags"), mustVorbisComment(t, "vendor", []string{"TITLE=song"})...)
 	ident := []byte("OpusHead\x01\x02")
 	in := serialiseOggPage(oggPage{
 		headerType: 0x02, serial: 7, seqno: 0,
@@ -136,7 +139,7 @@ func TestEmbedLyricsOGGFindsCommentAfterAnotherPacket(t *testing.T) {
 }
 
 func TestEmbedLyricsOGGHandlesInterleavedLogicalStreams(t *testing.T) {
-	comment := append([]byte("OpusTags"), flacVCSerialise("vendor", []string{"TITLE=" + strings.Repeat("a", 300)})...)
+	comment := append([]byte("OpusTags"), mustVorbisComment(t, "vendor", []string{"TITLE=" + strings.Repeat("a", 300)})...)
 	first, rest := comment[:255], comment[255:]
 	other := serialiseOggPage(oggPage{
 		headerType: 0x02, serial: 99, seqno: 0, lacing: []byte{4}, body: []byte("side"),
@@ -181,7 +184,7 @@ func TestEmbedLyricsOGGHandlesInterleavedLogicalStreams(t *testing.T) {
 }
 
 func TestEmbedLyricsOGGPreservesPacketTail(t *testing.T) {
-	comment := append([]byte("OpusTags"), flacVCSerialise("vendor", nil)...)
+	comment := append([]byte("OpusTags"), mustVorbisComment(t, "vendor", nil)...)
 	tail := []byte("audio-packet")
 	in := serialiseOggPage(oggPage{
 		headerType: 0x02, serial: 3, seqno: 0,
@@ -196,6 +199,53 @@ func TestEmbedLyricsOGGPreservesPacketTail(t *testing.T) {
 		t.Fatal("packet after comment header was lost")
 	}
 	if got, err := DumpLyrics(out, "ogg"); err != nil || got != "tail" {
+		t.Fatalf("DumpLyrics = %q, %v", got, err)
+	}
+}
+
+func TestEmbedLyricsOGGPreservesTailStartingWithFullSegment(t *testing.T) {
+	comment := append([]byte("OpusTags"), mustVorbisComment(t, "vendor", nil)...)
+	tail := bytes.Repeat([]byte{'a'}, 255)
+	in := serialiseOggPage(oggPage{
+		headerType: 0x02, serial: 4, seqno: 0,
+		lacing: []byte{byte(len(comment)), 255},
+		body:   append(append([]byte(nil), comment...), tail...),
+	})
+	in = append(in, serialiseOggPage(oggPage{
+		headerType: 0x01, serial: 4, seqno: 1, lacing: []byte{0},
+	})...)
+	out, err := EmbedLyrics(in, "ogg", "full-segment-tail")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(out, tail) {
+		t.Fatal("tail beginning with a 255-byte lacing segment was lost")
+	}
+	if got, err := DumpLyrics(out, "ogg"); err != nil || got != "full-segment-tail" {
+		t.Fatalf("DumpLyrics = %q, %v", got, err)
+	}
+}
+
+func TestEmbedLyricsOGGVorbisRetainsFramingBit(t *testing.T) {
+	comment := append([]byte{0x03, 'v', 'o', 'r', 'b', 'i', 's'}, mustVorbisComment(t, "vendor", nil)...)
+	comment = append(comment, 0x01)
+	in := serialiseOggPage(oggPage{
+		headerType: 0x02, serial: 8, seqno: 0,
+		lacing: []byte{byte(len(comment))}, body: comment,
+	})
+	out, err := EmbedLyrics(in, "ogg", "vorbis")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pages, err := oggParsePages(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loc, err := oggFindCommentPacket(pages)
+	if err != nil || loc.packet[len(loc.packet)-1] != 0x01 {
+		t.Fatalf("Vorbis framing bit was not retained: %v", err)
+	}
+	if got, err := DumpLyrics(out, "ogg"); err != nil || got != "vorbis" {
 		t.Fatalf("DumpLyrics = %q, %v", got, err)
 	}
 }
@@ -217,6 +267,36 @@ func TestEmbedLyricsFLACRejectsMissingLastMetadataBlock(t *testing.T) {
 	in = append(in, make([]byte, 34)...)
 	if _, err := EmbedLyrics(in, "flac", "line"); err == nil {
 		t.Fatal("unterminated FLAC metadata was accepted")
+	}
+}
+
+func TestEmbedLyricsFLACPreservesAudioPayloadWhenReplacingComment(t *testing.T) {
+	comment := mustVorbisComment(t, "vendor", []string{"TITLE=original"})
+	audioPayload := append([]byte{0xff, 0xf8, 0x00, 0x11}, bytes.Repeat([]byte{0x5a}, 128)...)
+	in := append([]byte("fLaC"), 0x00, 0x00, 0x00, 0x22)
+	in = append(in, make([]byte, 34)...)
+	in = append(in, 0x04, byte(len(comment)>>16), byte(len(comment)>>8), byte(len(comment)))
+	in = append(in, comment...)
+	in = append(in, 0x81, 0x00, 0x00, 0x04, 0, 0, 0, 0) // final PADDING block
+	in = append(in, audioPayload...)
+
+	out, err := EmbedLyrics(in, "flac", "replacement")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, inAudioOffset, err := flacMetadataBlocks(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, outAudioOffset, err := flacMetadataBlocks(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(in[inAudioOffset:], out[outAudioOffset:]) {
+		t.Fatal("FLAC audio payload changed while replacing Vorbis Comment")
+	}
+	if got, err := DumpLyrics(out, "flac"); err != nil || got != "replacement" {
+		t.Fatalf("DumpLyrics = %q, %v", got, err)
 	}
 }
 

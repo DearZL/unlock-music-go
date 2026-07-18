@@ -282,22 +282,6 @@ func id3WriteTag(major byte, frames [][]byte, audio []byte) ([]byte, error) {
 	return out.Bytes(), nil
 }
 
-// id3v2ParseFramesExcluding is retained for internal callers that only need a
-// best-effort frame list. Writers use id3ReadTag directly so malformed tags are
-// reported instead of being overwritten.
-func id3v2ParseFramesExcluding(data []byte, exclude map[string]bool) (frames [][]byte, tagEnd int) {
-	tag, present, err := id3ReadTag(data, exclude)
-	if err != nil || !present {
-		return nil, 0
-	}
-	return tag.frames, tag.audioOffset
-}
-
-func id3v2BuildUSLT(language, lyrics string) []byte {
-	frame, _ := id3v2BuildUSLTForVersion(3, language, lyrics)
-	return frame
-}
-
 func id3v2BuildUSLTForVersion(major byte, language, lyrics string) ([]byte, error) {
 	if len(language) < 3 {
 		language = "XXX"
@@ -645,16 +629,6 @@ func flacVCSerialiseChecked(vendor string, comments []string) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// flacVCSerialise is kept for small internal test fixtures and callers that
-// already control their input sizes.
-func flacVCSerialise(vendor string, comments []string) []byte {
-	data, err := flacVCSerialiseChecked(vendor, comments)
-	if err != nil {
-		return nil
-	}
-	return data
-}
-
 // ──────────────────────────────────────────────────────────────────────────────
 // Ogg / Vorbis Comment
 // ──────────────────────────────────────────────────────────────────────────────
@@ -834,9 +808,6 @@ func oggReplacePacketPages(first, last oggPage, beforeLacing, beforeBody, packet
 	if len(beforeLacing) > 0 && beforeLacing[len(beforeLacing)-1] == 255 {
 		return nil, errors.New("ogg: comment packet starts before a prior packet is complete")
 	}
-	if len(afterLacing) > 0 && afterLacing[0] == 255 {
-		return nil, errors.New("ogg: comment packet tail starts as a continuation")
-	}
 
 	pages := []oggPage{{
 		headerType: first.headerType &^ 0x04, // EOS belongs on the rebuilt final page
@@ -907,41 +878,6 @@ func addOggSequenceDelta(seq uint32, delta int) uint32 {
 		return seq + uint32(delta)
 	}
 	return seq - uint32(-delta)
-}
-
-// oggBuildPacketPages is used by tests and retains the conventional standalone
-// packet layout. Writers use oggReplacePacketPages to preserve adjacent packets.
-func oggBuildPacketPages(pkt []byte, serial, firstSeqno uint32, granule uint64) []oggPage {
-	lacing := oggPacketLacing(pkt)
-	var pages []oggPage
-	bodyOff := 0
-	for len(lacing) > 0 {
-		n := len(lacing)
-		if n > 255 {
-			n = 255
-		}
-		part := lacing[:n]
-		bodyLen := 0
-		for _, v := range part {
-			bodyLen += int(v)
-		}
-		headerType := byte(0)
-		if len(pages) > 0 && pages[len(pages)-1].lacing[len(pages[len(pages)-1].lacing)-1] == 255 {
-			headerType = 0x01
-		}
-		pageGranule := oggUnknownGranule
-		if n == len(lacing) {
-			pageGranule = granule
-		}
-		pages = append(pages, oggPage{
-			headerType: headerType, granule: pageGranule, serial: serial,
-			seqno: firstSeqno + uint32(len(pages)), lacing: append([]byte(nil), part...),
-			body: append([]byte(nil), pkt[bodyOff:bodyOff+bodyLen]...),
-		})
-		bodyOff += bodyLen
-		lacing = lacing[n:]
-	}
-	return pages
 }
 
 func oggParsePages(data []byte) ([]oggPage, error) {

@@ -5,6 +5,15 @@ import (
 	"testing"
 )
 
+func mustVorbisComment(t *testing.T, vendor string, comments []string) []byte {
+	t.Helper()
+	data, err := flacVCSerialiseChecked(vendor, comments)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return data
+}
+
 func TestEmbedLyricsMP3RoundTripUTF16(t *testing.T) {
 	audio := []byte{0xFF, 0xFB, 0x90, 0x64}
 	lyrics := "[00:01.00]你好\n[00:02.00]世界"
@@ -45,7 +54,7 @@ func TestEmbedLyricsFLACInsertsVorbisCommentAfterStreamInfo(t *testing.T) {
 
 func TestDumpLyricsOGGReassemblesCrossPageCommentPacket(t *testing.T) {
 	lyrics := strings.Repeat("a", 300)
-	pkt := append([]byte("OpusTags"), flacVCSerialise("vendor", []string{"LYRICS=" + lyrics})...)
+	pkt := append([]byte("OpusTags"), mustVorbisComment(t, "vendor", []string{"LYRICS=" + lyrics})...)
 	first := pkt[:255]
 	rest := pkt[255:]
 

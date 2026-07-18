@@ -86,7 +86,7 @@ func TestEmbedCoverFLACWritesPictureBlock(t *testing.T) {
 }
 
 func TestEmbedCoverOGGWritesMetadataBlockPicture(t *testing.T) {
-	pkt := append([]byte("OpusTags"), flacVCSerialise("vendor", nil)...)
+	pkt := append([]byte("OpusTags"), mustVorbisComment(t, "vendor", nil)...)
 	ogg := serialiseOggPage(oggPage{
 		headerType: 0x00,
 		serial:     1,

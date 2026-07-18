@@ -18,6 +18,8 @@ func main() {
 	dumpTags := flag.Bool("dump-tags", false, "Print embedded lyrics from a decoded MP3/FLAC/OGG file, then exit")
 	embedLyrics := flag.Bool("embed-lyrics", false, "Embed lyrics into plain (already-decoded) MP3/FLAC/OGG files")
 	withLyrics := flag.Bool("with-lyrics", false, "In decrypt mode, find a matching .lrc file and embed it into the decoded audio")
+	qqMusicDir := flag.String("qqmusic-dir", "", "QQ Music installation directory (needed only for recent musicex downloads)")
+	qqMusicMMKV := flag.String("qqmusic-mmkv", "", "Path to QQ Music Checkccae.dat (needed only for recent musicex downloads)")
 	flag.Usage = usage
 	flag.Parse()
 
@@ -59,5 +61,8 @@ func main() {
 	}
 
 	// ── decrypt mode (default) ──────────────────────────────────────────────
-	runDecryptMode(*inputPath, *outputDir, *lrcPattern, *withLyrics)
+	runDecryptMode(*inputPath, *outputDir, *lrcPattern, *withLyrics, decrypt.QQMusicOptions{
+		InstallDir: *qqMusicDir,
+		MMKVPath:   *qqMusicMMKV,
+	})
 }

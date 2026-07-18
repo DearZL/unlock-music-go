@@ -7,6 +7,7 @@
 ## 功能特性
 
 - 支持 30+ 种加密格式，覆盖主流中国音乐平台
+- 支持 QQ 音乐 Windows desktop 新版 `musicex` 下载：从本机 `Checkccae.dat` 匹配 EncV2 ekey
 - 可选检测同目录下的 `.lrc` 歌词文件并嵌入音频标签（MP3 → ID3v2 USLT；FLAC / OGG → Vorbis Comment）
 - NCM 解密会将容器内封面写回 MP3 / FLAC / OGG 输出标签
 - 批量模式：递归处理整个目录树
@@ -23,7 +24,7 @@
 | 平台 | 文件扩展名 |
 |---|---|
 | **网易云音乐** | `.ncm` `.uc`（缓存） |
-| **QQ 音乐** | `.mgg` `.mgg0` `.mggl` `.mgg1` `.mflac` `.mflac0` `.qmcflac` `.qmcogg` `.qmc0` `.qmc2` `.qmc3` `.qmc4` `.qmc6` `.qmc8` `.bkcmp3` `.bkcm4a` `.bkcflac` `.bkcwav` `.bkcape` `.bkcogg` `.bkcwma` `.tkm` `.cache` `.666c6163` `.6d7033` `.6f6767` `.6d3461` `.776176` |
+| **QQ 音乐** | `.mgg` `.mgg0` `.mggl` `.mgg1` `.mflac` `.mflac0` `.mmp4` `.qmcflac` `.qmcogg` `.qmc0` `.qmc2` `.qmc3` `.qmc4` `.qmc6` `.qmc8` `.bkcmp3` `.bkcm4a` `.bkcflac` `.bkcwav` `.bkcape` `.bkcogg` `.bkcwma` `.tkm` `.cache` `.666c6163` `.6d7033` `.6f6767` `.6d3461` `.776176` |
 | **QQ 音乐（旧版）** | `.tm2` `.tm6` |
 | **酷我音乐** | `.kwm` |
 | **喜马拉雅** | `.x2m` `.x3m` `.xm` |
@@ -64,6 +65,16 @@ go build -o unlock .
 GOOS=windows GOARCH=amd64 go build -o unlock.exe .
 ```
 
+QQ 音乐 Windows desktop 的新版 `musicex` 文件需要调用安装目录内的 32 位
+`CommonFunction.dll`，因此 Windows 版本需构建为 x86：
+
+```powershell
+$env:GOARCH = "386"
+go build -o unlock.exe .
+```
+
+旧版 QMC 与其余格式不受架构限制；只处理这些格式时，仍可使用 `amd64` 构建。
+
 ---
 
 ## 使用方法
@@ -84,6 +95,8 @@ unlock-music-go -i <文件.mp3|flac|ogg> -dump-tags
 | `-with-lyrics` | false | 解密模式下查找并嵌入匹配的 `.lrc` 歌词 |
 | `-embed-lyrics` | false | 启用歌词嵌入模式（不解密，仅写入歌词） |
 | `-dump-tags` | false | 打印 MP3、FLAC 或 OGG 文件中已嵌入的歌词内容，然后退出 |
+| `-qqmusic-dir` | 自动查找 | QQ Music 安装目录；仅新版 `musicex` 文件需要 |
+| `-qqmusic-mmkv` | `%APPDATA%\Tencent\QQMusic\Checkccae.dat` | 下载 ekey 缓存路径；仅新版 `musicex` 文件需要 |
 
 ---
 

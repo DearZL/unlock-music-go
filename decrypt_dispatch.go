@@ -6,7 +6,7 @@ import (
 	"unlock-music-go/decrypt"
 )
 
-func decryptFile(data []byte, ext string) ([]byte, string, error) {
+func decryptFile(data []byte, ext string, qqMusicOptions decrypt.QQMusicOptions) ([]byte, string, error) {
 	switch ext {
 	case "ncm":
 		r, err := decrypt.DecryptNcm(data)
@@ -29,11 +29,24 @@ func decryptFile(data []byte, ext string) ([]byte, string, error) {
 
 	case "mgg", "mgg0", "mggl", "mgg1",
 		"mflac", "mflac0",
+		"mmp4",
 		"qmcflac", "qmcogg",
 		"qmc0", "qmc2", "qmc3", "qmc4", "qmc6", "qmc8",
 		"bkcmp3", "bkcm4a", "bkcflac", "bkcwav", "bkcape", "bkcogg", "bkcwma",
 		"tkm", "666c6163", "6d7033", "6f6767", "6d3461", "776176":
-		r, err := decrypt.DecryptQmc(data, ext)
+		// Current QQ Music desktop downloads use the musicex footer.  Their
+		// payload cipher is QMC, but its ekey lives in Checkccae.dat rather
+		// than at the end of the file, so detect it before legacy QMC parsing.
+		var r *decrypt.QmcResult
+		var err error
+		// Test the magic first, then let DecryptQQMusicEx reject unsupported
+		// musicex versions.  A newer v2 footer must never fall through to the
+		// legacy QMC code and produce a misleading output file.
+		if decrypt.HasQQMusicExFooter(data) {
+			r, err = decrypt.DecryptQQMusicEx(data, ext, qqMusicOptions)
+		} else {
+			r, err = decrypt.DecryptQmc(data, ext)
+		}
 		if err != nil {
 			return nil, "", err
 		}

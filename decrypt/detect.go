@@ -2,6 +2,23 @@ package decrypt
 
 import "bytes"
 
+// HasKnownAudioMagic reports whether the first bytes have a recognised audio
+// container/frame signature.  It is used after current QQ Music musicex
+// decryption to catch a key/cipher-version mismatch before writing an output.
+func HasKnownAudioMagic(buf []byte) bool {
+	if len(buf) < 4 {
+		return false
+	}
+	return bytes.HasPrefix(buf, []byte{0x66, 0x4C, 0x61, 0x43}) || // fLaC
+		bytes.HasPrefix(buf, []byte{0x4F, 0x67, 0x67, 0x53}) || // OggS
+		(len(buf) >= 8 && bytes.Equal(buf[4:8], []byte("ftyp"))) ||
+		bytes.HasPrefix(buf, []byte{0x52, 0x49, 0x46, 0x46}) || // RIFF
+		bytes.HasPrefix(buf, []byte{0x30, 0x26, 0xB2, 0x75}) || // WMA
+		bytes.HasPrefix(buf, []byte{0x4D, 0x41, 0x43, 0x20}) || // MAC
+		bytes.HasPrefix(buf, []byte{0x49, 0x44, 0x33}) || // ID3
+		(buf[0] == 0xFF && buf[1]&0xE0 == 0xE0) // MPEG frame sync
+}
+
 // AudioExt maps magic bytes to file extensions.
 func SniffAudioExt(buf []byte) string {
 	if len(buf) < 4 {
@@ -20,9 +37,7 @@ func SniffAudioExt(buf []byte) string {
 		return "wma"
 	case bytes.HasPrefix(buf, []byte{0x4D, 0x41, 0x43, 0x20}): // MAC (APE)
 		return "ape"
-	case bytes.HasPrefix(buf, []byte{0xFF, 0xFB}) ||
-		bytes.HasPrefix(buf, []byte{0xFF, 0xF3}) ||
-		bytes.HasPrefix(buf, []byte{0xFF, 0xF2}) ||
+	case (buf[0] == 0xFF && buf[1]&0xE0 == 0xE0) ||
 		bytes.HasPrefix(buf, []byte{0x49, 0x44, 0x33}): // ID3
 		return "mp3"
 	}

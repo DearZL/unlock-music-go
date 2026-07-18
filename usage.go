@@ -11,7 +11,8 @@ func usage() {
 
 用法
   解密模式（默认）：
-    unlock-music-go -i <文件或目录> [-o <输出目录>] [-with-lyrics] [-lrc-pattern <正则>]
+  unlock-music-go -i <文件或目录> [-o <输出目录>] [-with-lyrics] [-lrc-pattern <正则>]
+                  [-qqmusic-dir <QQMusic 安装目录>] [-qqmusic-mmkv <Checkccae.dat>]
 
   写入歌词模式：
     unlock-music-go -i <文件或目录> -embed-lyrics [-o <输出目录>] [-lrc-pattern <正则>]
@@ -49,6 +50,15 @@ func usage() {
   不使用 -o 时：输出到源文件同目录
   使用 -o 时：保持目录结构输出到指定目录
   在 -embed-lyrics 模式下且未指定 -o：会直接覆盖原文件
+
+新版 QQ 音乐 desktop 下载（musicex）
+  新版 .mflac / .mgg / .mmp4 文件会自动从 musicex 尾部识别。其 ekey 存在
+  QQMusic 的 Checkccae.dat 中，程序会调用安装目录中的 CommonFunction.dll 读取
+  本机 MMKV key。该 DLL 是 32 位组件，因此请构建 32 位 Windows 可执行文件：
+    $env:GOARCH="386"; go build -o unlock.exe .
+  默认查找 %ProgramFiles(x86)%\Tencent\QQMusic 和
+  %APPDATA%\Tencent\QQMusic\Checkccae.dat；非默认位置用 -qqmusic-dir 和
+  -qqmusic-mmkv 指定。旧版 QMC 文件继续使用原有的尾部密钥流程。
 
 示例
   unlock-music-go -i song.mflac

@@ -9,7 +9,7 @@ import (
 	"unlock-music-go/decrypt"
 )
 
-func runDecryptMode(inputPath, outputDir, lrcPattern string, withLyrics bool) {
+func runDecryptMode(inputPath, outputDir, lrcPattern string, withLyrics bool, qqMusicOptions decrypt.QQMusicOptions) {
 	tasks, err := collectTasks(inputPath, encryptedExts)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "Error:", err)
@@ -29,7 +29,7 @@ func runDecryptMode(inputPath, outputDir, lrcPattern string, withLyrics bool) {
 
 	results := make([]taskResult, 0, len(tasks))
 	for _, task := range tasks {
-		r := processDecryptFile(task, outputDir, lrcPattern, withLyrics)
+		r := processDecryptFile(task, outputDir, lrcPattern, withLyrics, qqMusicOptions)
 		results = append(results, r)
 		printProgress(r)
 	}
@@ -37,7 +37,7 @@ func runDecryptMode(inputPath, outputDir, lrcPattern string, withLyrics bool) {
 }
 
 // processDecryptFile decrypts one file, optionally embeds lyrics, and writes the result.
-func processDecryptFile(task fileTask, outputDir, lrcPattern string, withLyrics bool) taskResult {
+func processDecryptFile(task fileTask, outputDir, lrcPattern string, withLyrics bool, qqMusicOptions decrypt.QQMusicOptions) taskResult {
 	r := taskResult{src: task.srcPath}
 
 	data, err := os.ReadFile(task.srcPath)
@@ -47,7 +47,7 @@ func processDecryptFile(task fileTask, outputDir, lrcPattern string, withLyrics 
 	}
 
 	ext := strings.ToLower(strings.TrimPrefix(filepath.Ext(task.srcPath), "."))
-	audio, outExt, err := decryptFile(data, ext)
+	audio, outExt, err := decryptFile(data, ext, qqMusicOptions)
 	if err != nil {
 		r.decryptErr = err
 		return r

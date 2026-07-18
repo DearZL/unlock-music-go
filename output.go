@@ -28,7 +28,10 @@ func printProgress(r taskResult) {
 	}
 }
 
-func printSummary(results []taskResult, embedMode bool) {
+// printSummary renders aggregate task status and reports whether every
+// processed task completed successfully. The caller maps a false result to a
+// non-zero process status, while still printing all per-file failures.
+func printSummary(results []taskResult, embedMode bool) bool {
 	total := len(results)
 	ok, withLrc, failed, skipped := 0, 0, 0, 0
 	var failedPaths []string
@@ -37,7 +40,7 @@ func printSummary(results []taskResult, embedMode bool) {
 		switch {
 		case r.skipped:
 			skipped++
-		case r.decryptErr != nil || r.writeErr != nil || (embedMode && r.lrcErr != nil):
+		case taskFailed(r, embedMode):
 			failed++
 			failedPaths = append(failedPaths, filepath.Base(r.src))
 		default:
@@ -70,4 +73,9 @@ func printSummary(results []taskResult, embedMode bool) {
 		}
 	}
 	fmt.Printf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+	return failed == 0
+}
+
+func taskFailed(r taskResult, embedMode bool) bool {
+	return r.decryptErr != nil || r.writeErr != nil || (embedMode && r.lrcErr != nil)
 }

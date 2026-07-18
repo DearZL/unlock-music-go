@@ -56,13 +56,17 @@ func main() {
 
 	// ── embed-lyrics mode ───────────────────────────────────────────────────
 	if *embedLyrics {
-		runEmbedMode(*inputPath, *outputDir, *lrcPattern)
+		if !runEmbedMode(*inputPath, *outputDir, *lrcPattern) {
+			os.Exit(1)
+		}
 		return
 	}
 
 	// ── decrypt mode (default) ──────────────────────────────────────────────
-	runDecryptMode(*inputPath, *outputDir, *lrcPattern, *withLyrics, decrypt.QQMusicOptions{
+	if !runDecryptMode(*inputPath, *outputDir, *lrcPattern, *withLyrics, decrypt.QQMusicOptions{
 		InstallDir: *qqMusicDir,
 		MMKVPath:   *qqMusicMMKV,
-	})
+	}) {
+		os.Exit(1)
+	}
 }

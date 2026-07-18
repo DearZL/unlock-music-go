@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -18,6 +19,21 @@ func TestFindLyricsPrefersExactMatch(t *testing.T) {
 	}
 	if got != filepath.Join(dir, "Song.lrc") {
 		t.Fatalf("got %q, want exact match", got)
+	}
+}
+
+func TestTaskFailedControlsProcessStatus(t *testing.T) {
+	if !taskFailed(taskResult{decryptErr: errors.New("decode")}, false) {
+		t.Fatal("decrypt error must fail decrypt mode")
+	}
+	if !taskFailed(taskResult{writeErr: errors.New("write")}, false) {
+		t.Fatal("write error must fail decrypt mode")
+	}
+	if taskFailed(taskResult{lrcErr: errors.New("lyrics")}, false) {
+		t.Fatal("lyrics warning must not fail decrypt mode")
+	}
+	if !taskFailed(taskResult{lrcErr: errors.New("lyrics")}, true) {
+		t.Fatal("lyrics error must fail embed mode")
 	}
 }
 

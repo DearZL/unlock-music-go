@@ -9,7 +9,7 @@ import (
 	"unlock-music-go/decrypt"
 )
 
-func runDecryptMode(inputPath, outputDir, lrcPattern string, withLyrics bool, qqMusicOptions decrypt.QQMusicOptions) {
+func runDecryptMode(inputPath, outputDir, lrcPattern string, withLyrics bool, qqMusicOptions decrypt.QQMusicOptions) bool {
 	tasks, err := collectTasks(inputPath, encryptedExts)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "Error:", err)
@@ -17,7 +17,7 @@ func runDecryptMode(inputPath, outputDir, lrcPattern string, withLyrics bool, qq
 	}
 	if len(tasks) == 0 {
 		fmt.Println("No supported encrypted files found.")
-		return
+		return true
 	}
 
 	if outputDir != "" {
@@ -33,7 +33,7 @@ func runDecryptMode(inputPath, outputDir, lrcPattern string, withLyrics bool, qq
 		results = append(results, r)
 		printProgress(r)
 	}
-	printSummary(results, false)
+	return printSummary(results, false)
 }
 
 // processDecryptFile decrypts one file, optionally embeds lyrics, and writes the result.
@@ -77,7 +77,7 @@ func processDecryptFile(task fileTask, outputDir, lrcPattern string, withLyrics 
 	return r
 }
 
-func runEmbedMode(inputPath, outputDir, lrcPattern string) {
+func runEmbedMode(inputPath, outputDir, lrcPattern string) bool {
 	tasks, err := collectTasks(inputPath, plainAudioExts)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "Error:", err)
@@ -85,7 +85,7 @@ func runEmbedMode(inputPath, outputDir, lrcPattern string) {
 	}
 	if len(tasks) == 0 {
 		fmt.Println("No MP3, FLAC, or OGG files found.")
-		return
+		return true
 	}
 
 	if outputDir != "" {
@@ -101,7 +101,7 @@ func runEmbedMode(inputPath, outputDir, lrcPattern string) {
 		results = append(results, r)
 		printProgress(r)
 	}
-	printSummary(results, true)
+	return printSummary(results, true)
 }
 
 // processEmbedFile embeds lyrics into a plain (already-decoded) audio file.

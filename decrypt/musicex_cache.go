@@ -7,38 +7,11 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"regexp"
 	"strings"
 )
 
 var musicExKeyPattern = regexp.MustCompile(`[A-Za-z0-9+/=]{100,}`)
-
-// resolveQQMusicInstallDir finds the client installation required by the
-// current device-key provider.
-func resolveQQMusicInstallDir(configured string) (string, error) {
-	candidates := make([]string, 0, 4)
-	if configured != "" {
-		candidates = append(candidates, configured)
-	}
-	if envDir := os.Getenv("QQMUSIC_DIR"); envDir != "" {
-		candidates = append(candidates, envDir)
-	}
-	candidates = append(candidates,
-		filepath.Join(os.Getenv("ProgramFiles(x86)"), "Tencent", "QQMusic"),
-		filepath.Join(os.Getenv("ProgramFiles"), "Tencent", "QQMusic"),
-	)
-
-	for _, dir := range candidates {
-		if dir == "" {
-			continue
-		}
-		if info, err := os.Stat(filepath.Join(dir, "CommonFunction.dll")); err == nil && !info.IsDir() {
-			return dir, nil
-		}
-	}
-	return "", errors.New("qqmusic/musicex: CommonFunction.dll not found; specify -qqmusic-dir")
-}
 
 // decryptQQMusicMMKV decrypts the Checkccae.dat byte range that contains
 // the MMKV records and their EncV2 keys.
@@ -105,8 +78,8 @@ func findQQMusicEKey(mmkvPlain []byte, innerName string) (string, error) {
 		if len(matches) == 1 {
 			return string(mmkvPlain[matches[0][0]:matches[0][1]]), nil
 		}
-	return "", fmt.Errorf("qqmusic/mmkv: no ekey matches %q", innerName)
-}
+		return "", fmt.Errorf("qqmusic/mmkv: no ekey matches %q", innerName)
+	}
 	match := matches[bestIndex]
 	return string(mmkvPlain[match[0]:match[1]]), nil
 }

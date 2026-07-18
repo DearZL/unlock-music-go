@@ -8,12 +8,10 @@ import (
 	"path/filepath"
 )
 
-// QQMusicOptions specifies where a local QQ Music desktop installation and
-// its encrypted download-key cache are located. Empty fields select the
-// normal Windows locations.
+// QQMusicOptions specifies the encrypted local download-key cache location.
+// An empty path selects the normal Windows QQ Music location.
 type QQMusicOptions struct {
-	InstallDir string
-	MMKVPath   string
+	MMKVPath string
 }
 
 // DecryptQQMusicEx decrypts a recent musicex file. It parses the container,
@@ -34,11 +32,7 @@ func DecryptQQMusicEx(data []byte, rawExt string, options QQMusicOptions) (*QmcR
 		mmkvPath = filepath.Join(appData, "Tencent", "QQMusic", "Checkccae.dat")
 	}
 
-	installDir, err := resolveQQMusicInstallDir(options.InstallDir)
-	if err != nil {
-		return nil, err
-	}
-	deviceKey, err := qqMusicDeviceMMKVKey(installDir)
+	deviceKey, err := qqMusicDeviceMMKVKey()
 	if err != nil {
 		return nil, err
 	}

@@ -1,12 +1,16 @@
 # unlock-music-go
 
-用 Go 编写的命令行音乐文件解密工具，支持网易云、QQ 音乐、酷狗、酷我、喜马拉雅与咪咕的常见加密格式；也支持为 MP3、FLAC、OGG 写入或读取 LRC 歌词标签。
+Go 编写的命令行音乐文件解密工具，覆盖网易云、QQ 音乐、酷狗、酷我、喜马拉雅和咪咕的常见加密格式，并支持为 MP3、FLAC、OGG 写入或读取 LRC 歌词标签。
 
-## 当前状态
+## 特性
 
-- 旧版格式和通用 QMC 流均为纯 Go 实现，`amd64`、`386` 均可构建。
-- 新版 QQ Music desktop `musicex`：容器解析、`Checkccae.dat` 解密、EncV2 ekey 匹配、QMC Map/RC4 音频流解密均已在 Go 中实现。
-- `musicex` 自动读取本机 MMKV device key 的最后一环仍调用 QQ Music 的 32 位 `CommonFunction.dll`（ordinal 12）。因此，**现阶段完整自动解密新版 `musicex` 请使用 Windows `386` 构建**；`amd64` 会完成容器识别后在该步骤给出明确报错。
+- 支持 30+ 种加密文件扩展名。
+- 支持 QQ Music desktop 当前 `musicex` 下载格式，完整链路为纯 Go。
+- 新版 `musicex` 支持 Windows `amd64` 和 `386`；不加载 `CommonFunction.dll`，不依赖 QQ Music 安装目录。
+- 自动读取本机 `%APPDATA%\Tencent\QQMusic\Checkccae.dat`，也支持 `-qqmusic-mmkv` 指定缓存文件。
+- 解密时可匹配 LRC 并写入 MP3 `USLT`、FLAC / OGG `LYRICS` 标签。
+- NCM 解密会将容器中的封面写回 MP3、FLAC、OGG 输出文件。
+- 目录输入会递归处理并保留原始子目录结构；存在失败文件时进程返回码为 `1`。
 
 ## 支持格式
 
@@ -20,11 +24,11 @@
 | 喜马拉雅 | `.xm`、`.x2m`、`.x3m` |
 | 咪咕音乐 | `.mg3d` |
 
-输出格式由解密后的音频头自动识别，通常为 MP3、FLAC、OGG、M4A、WAV 或 APE。
+输出扩展名由解密后的音频头自动识别，通常为 MP3、FLAC、OGG、M4A、WAV 或 APE。
 
-## 新版 QQ Music `musicex`
+## QQ Music `musicex`
 
-文件尾部固定保留一个 16 字节 footer：
+当前 QQ Music desktop 下载文件在尾部带有 16 字节 footer：
 
 ```text
 0x00..0x03  uint32 LE  footer length
@@ -32,35 +36,37 @@
 0x08..0x0F  ASCII      "musicex\\0"
 ```
 
-`musicex` 文件不会降级走旧 QMC 路径：检测到 footer magic 后，程序先校验 `version=1`、footer 长度和内嵌 UTF-16LE 文件名。这样未来出现新版本时，失败位置会保留在版本校验或后续密钥环节，而不会产出误导性的旧算法结果。
+检测到 footer magic 后，程序会校验 `version=1`、footer 长度及内嵌 UTF-16LE 文件名；新版本容器保持在版本校验路径中，不会进入旧 QMC 分支。
 
 ### 解密链路
 
 ```mermaid
 flowchart LR
-  A[加密文件] --> B{musicex footer?}
-  B -->|否| C[旧格式解密器]
-  B -->|是| D[container: 校验 v1 与读取内部文件名]
-  D --> E[cache: 解密 Checkccae.dat]
-  E --> F[匹配 EncV2 ekey]
-  F --> G[payload: Go QMC Map/RC4 流]
-  G --> H[音频头校验与扩展名识别]
+  A[musicex 文件] --> B[container: footer / version / 内部文件名]
+  B --> C[device: PCI MAC + 系统盘 identity]
+  C --> D[cache: 解密 Checkccae.dat]
+  D --> E[按内部文件名匹配 EncV2 ekey]
+  E --> F[payload: Go QMC Map/RC4 流]
+  F --> G[音频头校验与输出扩展名]
 ```
 
-| `musicex` 环节 | Windows amd64 | Windows 386 |
+| 环节 | Windows amd64 | Windows 386 |
 |---|---:|---:|
-| footer / version / 内部文件名校验 | ✓ | ✓ |
-| `Checkccae.dat` AES-CFB 与 ekey 匹配 | ✓ | ✓ |
-| QMC Map/RC4 payload 流解密 | ✓（纯 Go） | ✓（纯 Go） |
-| 自动生成本机 MMKV device key | 依赖 32 位 DLL，当前在此结束 | ✓ |
-| 完整本机 `musicex` 解密 | 当前未完成 | ✓ |
+| `musicex` footer / `version=1` 校验 | ✓ | ✓ |
+| MMKV device key 推导 | ✓ | ✓ |
+| `Checkccae.dat` AES-CFB 解密与 ekey 匹配 | ✓ | ✓ |
+| QMC Map/RC4 payload 流解密 | ✓ | ✓ |
+| QQ Music DLL / 安装目录 | 无需 | 无需 |
 
-默认会查找：
+`Checkccae.dat` 保存下载记录中的 EncV2 ekey，且由下载机器的 device key 保护。自动读取模式使用该缓存对应的 Windows 机器硬件标识：PCI 网卡 MAC、系统盘序列号、型号、固件版本。缓存内须保留与目标文件内部名对应的记录。
 
-- QQ Music：`%ProgramFiles(x86)%\Tencent\QQMusic\CommonFunction.dll`
-- 下载 key 缓存：`%APPDATA%\Tencent\QQMusic\Checkccae.dat`
+默认缓存位置：
 
-可通过 `-qqmusic-dir` 和 `-qqmusic-mmkv` 覆盖这两个位置。
+```text
+%APPDATA%\Tencent\QQMusic\Checkccae.dat
+```
+
+非默认位置使用 `-qqmusic-mmkv` 指定。
 
 ## 构建
 
@@ -72,9 +78,7 @@ Set-Location unlock-music-go
 go test ./...
 ```
 
-### 常规 / amd64 构建
-
-适用于全部旧格式，也可验证 `musicex` 容器、缓存和纯 Go payload 模块。
+### Windows x64
 
 ```powershell
 $env:GOOS = 'windows'
@@ -82,15 +86,15 @@ $env:GOARCH = 'amd64'
 go build -o .\unlock-amd64.exe .
 ```
 
-### 新版 `musicex` 完整解密构建
-
-当前自动 device key 读取进入 QQ Music 32 位 DLL，使用 x86 构建：
+### Windows x86
 
 ```powershell
 $env:GOOS = 'windows'
 $env:GOARCH = '386'
 go build -o .\unlock-386.exe .
 ```
+
+两种 Windows 构建使用同一套纯 Go `musicex`、MMKV、QMC 代码；x64 为默认推荐构建。
 
 ## 使用
 
@@ -108,29 +112,27 @@ unlock-music-go -i <文件.mp3|flac|ogg> -dump-tags
 | `-embed-lyrics` | `false` | 仅给已有 MP3 / FLAC / OGG 写入歌词 |
 | `-dump-tags` | `false` | 打印 MP3 / FLAC / OGG 内嵌歌词并退出 |
 | `-lrc-pattern` | `{name}\.lrc` | 歌词正则模板，`{name}` 代表已转义的歌曲文件名 |
-| `-qqmusic-dir` | 自动查找 | QQ Music 安装目录，仅 `musicex` 使用 |
-| `-qqmusic-mmkv` | `%APPDATA%\Tencent\QQMusic\Checkccae.dat` | QQ Music key 缓存，仅 `musicex` 使用 |
+| `-qqmusic-mmkv` | `%APPDATA%\Tencent\QQMusic\Checkccae.dat` | QQ Music 下载 ekey 缓存，仅 `musicex` 使用 |
 
 ```powershell
-# 单文件
-.\unlock-386.exe -i 'D:\Music\song.mflac'
+# 解密单个 musicex 文件
+.\unlock-amd64.exe -i 'D:\Music\song.mflac'
 
-# 递归批量解密并输出到单独目录
-.\unlock-386.exe -i 'D:\Music' -o 'D:\Decoded'
+# 递归批量解密
+.\unlock-amd64.exe -i 'D:\Music' -o 'D:\Decoded'
 
-# 解密时写入同目录匹配到的 LRC
-.\unlock-386.exe -i 'D:\Music' -o 'D:\Decoded' -with-lyrics
+# 指定非默认 Checkccae.dat
+.\unlock-amd64.exe -i 'D:\Music\song.mflac' `
+  -qqmusic-mmkv 'E:\QQMusicData\Checkccae.dat'
 
-# 使用非默认 QQ Music 路径
-.\unlock-386.exe -i 'D:\Music\song.mflac' `
-  -qqmusic-dir 'D:\Apps\QQMusic' `
-  -qqmusic-mmkv 'D:\QQMusicData\Checkccae.dat'
+# 解密并写入同目录匹配到的歌词
+.\unlock-amd64.exe -i 'D:\Music' -o 'D:\Decoded' -with-lyrics
 
-# 仅为明文文件写入歌词；未给 -o 时会覆盖源文件
-.\unlock-386.exe -i 'D:\Music' -embed-lyrics -o 'D:\Tagged'
+# 给明文音频写入歌词；未给 -o 时覆盖源文件
+.\unlock-amd64.exe -i 'D:\Music' -embed-lyrics -o 'D:\Tagged'
 
-# 查看已经写入的歌词
-.\unlock-386.exe -i 'D:\Tagged\song.flac' -dump-tags
+# 查看已写入的歌词
+.\unlock-amd64.exe -i 'D:\Tagged\song.flac' -dump-tags
 ```
 
 ### 歌词规则与标签
@@ -148,51 +150,52 @@ unlock-music-go -i <文件.mp3|flac|ogg> -dump-tags
 
 ```text
 unlock-music-go/
-├── main.go                 # flag 解析与三种运行模式入口
+├── main.go                 # flag 解析与运行模式入口
 ├── run_modes.go            # 单文件 / 批量解密、歌词嵌入流程
 ├── decrypt_dispatch.go     # 扩展名分发；musicex 优先于旧 QMC
 ├── files.go                # 遍历、歌词查找、输出路径
-├── output.go               # 进度与汇总显示
+├── output.go               # 进度、汇总与进程状态
 ├── encoding.go             # LRC 文本编码识别
-├── types.go                # 任务与扩展名集合
 ├── usage.go                # CLI 帮助
 └── decrypt/
-    ├── musicex.go           # 新版 musicex 编排：container → cache → payload
-    ├── musicex_container.go # footer、version、UTF-16LE 内部文件名
-    ├── musicex_cache.go     # 安装/缓存定位、AES-CFB、ekey 匹配
-    ├── musicex_payload.go   # 纯 Go QMC Map/RC4 payload 解密与音频头校验
-    ├── mmkv_device_windows_386.go # Windows/x86 的 CommonFunction ordinal 12
-    ├── mmkv_device_stub.go  # 其他构建目标的明确状态返回
+    ├── musicex.go           # 新版 musicex 编排
+    ├── musicex_container.go # footer、版本、UTF-16LE 内部文件名
+    ├── musicex_cache.go     # Checkccae.dat、AES-CFB、ekey 匹配
+    ├── musicex_payload.go   # 纯 Go QMC Map/RC4 payload 解密
+    ├── mmkv_device_windows.go # Windows 设备标识与 MMKV key 纯 Go 推导
+    ├── mmkv_device_stub.go  # 非 Windows 构建提示
     ├── qmc.go / qmc_key.go / qmc_cipher.go # QQ QMC 与密钥派生
     ├── ncm*.go              # 网易云解密与缓存
     ├── kgm.go / kwm.go / tm.go / xm.go / ximalaya.go / mg3d.go
     ├── lyrics.go / tags_read.go / cover.go
-    └── *_test.go             # 格式、密码流、标签和 musicex 单元测试
+    └── *_test.go             # 容器、密码流、标签与 device key 测试
 ```
 
-顶层 `main` 包仅负责 CLI 与文件任务，`decrypt` 包只负责字节级容器、密码和标签处理。`musicex` 再按容器、缓存、payload 三层拆分，便于独立测试版本识别、MMKV 记录匹配与流解密。
+顶层 `main` 包负责 CLI 与文件任务，`decrypt` 包负责字节级容器、密码、硬件标识和标签处理。`musicex` 按 container、device、cache、payload 四层拆分，便于独立验证每个环节。
 
 ## 验证
 
 ```powershell
-# 默认架构测试
-go test ./...
+# 默认架构（Windows amd64）
+$env:GOARCH = 'amd64'
+go test -count=1 ./...
+go vet ./...
 
-# x86 测试（含 build-tag 覆盖）
+# Windows x86
 $env:GOARCH = '386'
-go test ./...
+go test -count=1 ./...
 
-# 64 位构建与当前 musicex 端到端状态检查
+# 真实 musicex 批量检查
 $env:GOARCH = 'amd64'
 go build -o .\unlock-amd64.exe .
-.\unlock-amd64.exe -i 'D:\Music\song.mflac' -o "$env:TEMP\unlock-amd64-check"
+.\unlock-amd64.exe -i 'D:\Music' -o 'D:\Decoded'
 ```
 
-最后一条在当前版本会识别 `musicex` 并在生成 MMKV device key 的 32 位 DLL 边界结束；`386` 可执行文件走同一条容器、缓存和纯 Go payload 链路并完成输出。批量处理时每个文件的成功或失败都会显示在 Summary 中；存在失败文件时进程返回码为 `1`。
+验收条件：每个 `musicex` 文件显示 `OK`，输出文件音频头可识别，例如 FLAC 为 `66-4C-61-43`，Summary 返回成功，进程返回码为 `0`。
 
 ## 依赖
 
-唯一的第三方依赖是 `golang.org/x/text`，用于 GBK / GB18030 歌词解码。其余解密和标签逻辑均由项目自身代码实现。
+唯一第三方依赖为 `golang.org/x/text`，用于 GBK / GB18030 歌词解码。其余解密、Windows device key 与标签逻辑均由项目自身代码实现。
 
 ## 声明
 

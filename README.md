@@ -142,7 +142,6 @@ git clone <仓库地址>
 Set-Location unlock-music-go
 $env:GOOS = 'windows'
 $env:GOARCH = 'amd64'
-go test -count=1 ./...
 go build -o .\unlock-music-go.exe .
 ```
 
@@ -250,11 +249,7 @@ unlock-music-go/
     └── *_test.go             # 容器、密码流、标签与 device key 测试
 ```
 
-顶层 `main` 包负责 CLI 与文件任务，`decrypt` 包负责字节级容器、密码、硬件标识和标签处理。`musicex` 按 container、device、cache、payload 四层拆分，便于独立验证每个环节。
-
-### 架构结论
-
-当前架构与维护范围匹配：CLI、任务编排、输出汇总和字节级解密职责分离；`musicex` 的容器、设备、缓存、payload 边界清晰；其余平台解密器保持独立文件。现阶段维持该结构，无需继续拆分目录或引入新的抽象层。
+顶层 `main` 包负责 CLI 与文件任务，`decrypt` 包负责字节级容器、密码、硬件标识和标签处理。`musicex` 按 container、device、cache、payload 四层拆分。
 
 ```mermaid
 flowchart TB
@@ -295,35 +290,6 @@ flowchart TB
   Lyrics  : 1 embedded, 1 missing
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```
-
-## 验证
-
-```mermaid
-flowchart LR
-    A[🧪 go test] --> B[🔍 go vet]
-    B --> C[🎼 真实 musicex 解密]
-    C --> D[🔖 音频头与歌词标签检查]
-    D --> E[✅ 可提交版本]
-
-    classDef check fill:#1e3a8a,stroke:#93c5fd,color:#fff;
-    classDef done fill:#166534,stroke:#86efac,color:#fff;
-    class A,B,C,D check;
-    class E done;
-```
-
-```powershell
-# Windows x64
-$env:GOOS = 'windows'
-$env:GOARCH = 'amd64'
-go test -count=1 ./...
-go vet ./...
-
-# 真实 musicex 批量检查
-go build -o .\unlock-music-go.exe .
-.\unlock-music-go.exe -i 'D:\Music' -o 'D:\Decoded'
-```
-
-验收条件：每个 `musicex` 文件显示 `OK`，输出文件音频头可识别，例如 FLAC 为 `66-4C-61-43`，Summary 返回成功，进程返回码为 `0`。默认歌词模式下，`Lyrics` 行会给出 embedded、missing 与 warning 结果。
 
 ## 依赖
 

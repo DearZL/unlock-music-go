@@ -11,6 +11,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"unicode/utf16"
 	"unicode/utf8"
 
 	"golang.org/x/text/encoding/simplifiedchinese"
@@ -58,10 +59,9 @@ func decodeUTF16(data []byte, order binary.ByteOrder) string {
 	if len(data)%2 != 0 {
 		data = data[:len(data)-1] // drop incomplete final code unit
 	}
-	runes := make([]rune, 0, len(data)/2)
+	codeUnits := make([]uint16, 0, len(data)/2)
 	for i := 0; i < len(data); i += 2 {
-		u := order.Uint16(data[i : i+2])
-		runes = append(runes, rune(u))
+		codeUnits = append(codeUnits, order.Uint16(data[i:i+2]))
 	}
-	return string(runes)
+	return string(utf16.Decode(codeUnits))
 }

@@ -27,46 +27,33 @@ func DumpLyrics(data []byte, ext string) (string, error) {
 
 // dumpLyricsMP3 finds the first USLT frame in an ID3v2 tag and returns its text.
 func dumpLyricsMP3(data []byte) (string, error) {
-	if len(data) < 10 || string(data[0:3]) != "ID3" {
+	tag, present, err := id3ReadTag(data, nil)
+	if err != nil {
+		return "", err
+	}
+	if !present {
 		return "", fmt.Errorf("no ID3v2 tag found")
 	}
-	version := data[3]
-	if version != 3 && version != 4 {
-		return "", fmt.Errorf("unsupported ID3v2 version: 2.%d", version)
-	}
-	tagSize := int(decodeSyncsafe(data[6:10]))
-	tagEnd := 10 + tagSize
-	if tagEnd > len(data) {
-		tagEnd = len(data)
-	}
-
-	pos := 10
-	for pos+10 <= tagEnd {
-		if data[pos] == 0x00 {
-			break
+	for _, frame := range tag.frames {
+		idLen := 4
+		if tag.major == 2 {
+			idLen = 3
 		}
-		frameID := string(data[pos : pos+4])
-		var frameSize int
-		if version == 4 {
-			frameSize = int(decodeSyncsafe(data[pos+4 : pos+8]))
-		} else {
-			frameSize = int(binary.BigEndian.Uint32(data[pos+4 : pos+8]))
+		if id3CanonicalFrameID(tag.major, string(frame[:idLen])) != "USLT" {
+			continue
 		}
-		dataStart := pos + 10
-		dataEnd := dataStart + frameSize
-		if dataEnd > tagEnd {
-			break
+		fd, err := id3FramePayload(frame, tag.major)
+		if err != nil {
+			return "", err
 		}
-
-		if frameID == "USLT" && frameSize >= 5 {
-			fd := data[dataStart:dataEnd]
-			// fd: encoding(1) + language(3) + descriptor(null-terminated) + lyrics
-			lyricsStart := id3LyricsTextStart(fd)
-			if lyricsStart >= 0 && lyricsStart <= len(fd) {
-				return decodeID3Text(fd[0], fd[lyricsStart:]), nil
-			}
+		if len(fd) < 5 {
+			continue
 		}
-		pos = dataEnd
+		// fd: encoding(1) + language(3) + descriptor(null-terminated) + lyrics
+		lyricsStart := id3LyricsTextStart(fd)
+		if lyricsStart >= 0 && lyricsStart <= len(fd) {
+			return decodeID3Text(fd[0], fd[lyricsStart:]), nil
+		}
 	}
 	return "", fmt.Errorf("no USLT (UNSYNCEDLYRICS) frame found in ID3v2 tag")
 }
@@ -131,34 +118,39 @@ func dumpLyricsOGG(data []byte) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("ogg: %w", err)
 	}
-
-	for i, page := range pages {
-		if page.headerType&0x01 != 0 {
-			continue
-		}
-		b := page.body
-		var prefixLen int
-		switch {
-		case len(b) >= 7 && b[0] == 0x03 && string(b[1:7]) == "vorbis":
-			prefixLen = 7
-		case len(b) >= 8 && string(b[0:8]) == "OpusTags":
-			prefixLen = 8
-		default:
-			continue
-		}
-		pkt, err := oggReassemblePacket(pages, i)
-		if err != nil {
-			return "", err
-		}
-		return dumpLyricsFromVC(pkt[prefixLen:])
+	loc, err := oggFindCommentPacket(pages)
+	if err != nil {
+		return "", err
 	}
-	return "", fmt.Errorf("ogg: no comment header found")
+	pkt := loc.packet
+	switch {
+	case len(pkt) >= 8 && string(pkt[:8]) == "OpusTags":
+		return dumpLyricsFromVC(pkt[8:])
+	case len(pkt) >= 8 && pkt[0] == 0x03 && string(pkt[1:7]) == "vorbis":
+		if pkt[len(pkt)-1] != 0x01 {
+			return "", fmt.Errorf("vorbis comment header has no framing bit")
+		}
+		return dumpLyricsFromVC(pkt[7 : len(pkt)-1])
+	default:
+		return "", fmt.Errorf("ogg: no comment header found")
+	}
 }
 
 func oggReassemblePacket(pages []oggPage, first int) ([]byte, error) {
+	if first < 0 || first >= len(pages) {
+		return nil, fmt.Errorf("ogg: invalid first page")
+	}
+	serial := pages[first].serial
 	var buf []byte
-	for j := first; j < len(pages); j++ {
-		p := pages[j]
+	started := false
+	for _, p := range pages[first:] {
+		if p.serial != serial {
+			continue
+		}
+		if !started && p.headerType&0x01 != 0 {
+			return nil, fmt.Errorf("ogg: packet starts on a continuation page")
+		}
+		started = true
 		bodyOff := 0
 		for _, segLen := range p.lacing {
 			end := bodyOff + int(segLen)
@@ -172,32 +164,16 @@ func oggReassemblePacket(pages []oggPage, first int) ([]byte, error) {
 			}
 		}
 	}
-	return nil, fmt.Errorf("ogg: comment packet not terminated")
+	return nil, fmt.Errorf("ogg: packet not terminated")
 }
 
 // dumpLyricsFromVC extracts the LYRICS= value from raw Vorbis Comment data.
 func dumpLyricsFromVC(data []byte) (string, error) {
-	if len(data) < 8 {
-		return "", fmt.Errorf("vorbis comment block too short")
+	_, comments, err := parseVorbisComment(data)
+	if err != nil {
+		return "", err
 	}
-	vendorLen := int(binary.LittleEndian.Uint32(data[0:4]))
-	off := 4 + vendorLen
-	if off+4 > len(data) {
-		return "", fmt.Errorf("vorbis comment: vendor string truncated")
-	}
-	count := int(binary.LittleEndian.Uint32(data[off : off+4]))
-	off += 4
-	for i := 0; i < count; i++ {
-		if off+4 > len(data) {
-			break
-		}
-		cLen := int(binary.LittleEndian.Uint32(data[off : off+4]))
-		off += 4
-		if off+cLen > len(data) {
-			break
-		}
-		comment := string(data[off : off+cLen])
-		off += cLen
+	for _, comment := range comments {
 		if strings.HasPrefix(strings.ToUpper(comment), "LYRICS=") {
 			return comment[7:], nil
 		}
@@ -207,55 +183,14 @@ func dumpLyricsFromVC(data []byte) (string, error) {
 
 // dumpLyricsFLAC finds the LYRICS= comment in a FLAC Vorbis Comment block.
 func dumpLyricsFLAC(data []byte) (string, error) {
-	if len(data) < 4 || string(data[0:4]) != "fLaC" {
-		return "", fmt.Errorf("not a FLAC file")
+	blocks, _, err := flacMetadataBlocks(data)
+	if err != nil {
+		return "", err
 	}
-	pos := 4
-	for pos+4 <= len(data) {
-		header := data[pos]
-		blockType := header & 0x7F
-		isLast := (header >> 7) == 1
-		blockSize := int(data[pos+1])<<16 | int(data[pos+2])<<8 | int(data[pos+3])
-		dataStart := pos + 4
-		dataEnd := dataStart + blockSize
-		if dataEnd > len(data) {
-			break
+	for _, block := range blocks {
+		if block.typ == 4 {
+			return dumpLyricsFromVC(data[block.start+4 : block.start+4+block.size])
 		}
-
-		if blockType == 4 { // VORBIS_COMMENT
-			bd := data[dataStart:dataEnd]
-			if len(bd) < 8 {
-				break
-			}
-			vendorLen := int(binary.LittleEndian.Uint32(bd[0:4]))
-			if 4+vendorLen+4 > len(bd) {
-				break
-			}
-			off := 4 + vendorLen
-			count := int(binary.LittleEndian.Uint32(bd[off : off+4]))
-			off += 4
-			for i := 0; i < count; i++ {
-				if off+4 > len(bd) {
-					break
-				}
-				cLen := int(binary.LittleEndian.Uint32(bd[off : off+4]))
-				off += 4
-				if off+cLen > len(bd) {
-					break
-				}
-				comment := string(bd[off : off+cLen])
-				off += cLen
-				if strings.HasPrefix(strings.ToUpper(comment), "LYRICS=") {
-					return comment[7:], nil
-				}
-			}
-			return "", fmt.Errorf("no LYRICS field found in Vorbis Comment block")
-		}
-
-		if isLast {
-			break
-		}
-		pos = dataEnd
 	}
 	return "", fmt.Errorf("no Vorbis Comment block found in FLAC file")
 }

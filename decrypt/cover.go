@@ -27,33 +27,36 @@ func EmbedCover(audio []byte, ext string, image []byte) ([]byte, error) {
 }
 
 func embedCoverMP3(audio, image []byte) ([]byte, error) {
-	existingFrames, tagEnd := id3v2ParseFramesExcluding(audio, map[string]bool{"APIC": true})
-	apicFrame := id3v2BuildAPIC(detectImageMime(image), image)
-
-	var framesBuf bytes.Buffer
-	for _, f := range existingFrames {
-		framesBuf.Write(f)
+	tag, present, err := id3ReadTag(audio, map[string]bool{"APIC": true})
+	if err != nil {
+		return nil, err
 	}
-	framesBuf.Write(apicFrame)
-
-	syncsafeSize := [4]byte{}
-	encodeSyncsafe(syncsafeSize[:], uint32(framesBuf.Len()))
-
-	var tag bytes.Buffer
-	tag.WriteString("ID3")
-	tag.WriteByte(0x03)
-	tag.WriteByte(0x00)
-	tag.WriteByte(0x00)
-	tag.Write(syncsafeSize[:])
-	tag.Write(framesBuf.Bytes())
-
-	var out bytes.Buffer
-	out.Write(tag.Bytes())
-	out.Write(audio[tagEnd:])
-	return out.Bytes(), nil
+	if !present {
+		tag = id3Tag{major: 3}
+	}
+	apicFrame, err := id3v2BuildAPICForVersion(tag.major, detectImageMime(image), image)
+	if err != nil {
+		return nil, err
+	}
+	tag.frames = append(tag.frames, apicFrame)
+	return id3WriteTag(tag.major, tag.frames, audio[tag.audioOffset:])
 }
 
 func id3v2BuildAPIC(mime string, image []byte) []byte {
+	frame, _ := id3v2BuildAPICForVersion(3, mime, image)
+	return frame
+}
+
+func id3v2BuildAPICForVersion(major byte, mime string, image []byte) ([]byte, error) {
+	if major == 2 {
+		var data bytes.Buffer
+		data.WriteByte(0x00) // ISO-8859-1
+		data.WriteString(id3v22PictureFormat(mime))
+		data.WriteByte(0x03) // front cover
+		data.WriteByte(0x00) // empty description
+		data.Write(image)
+		return id3BuildFrame(2, "PIC", data.Bytes())
+	}
 	var data bytes.Buffer
 	data.WriteByte(0x00) // ISO-8859-1 fields for MIME and empty description.
 	data.WriteString(mime)
@@ -62,12 +65,22 @@ func id3v2BuildAPIC(mime string, image []byte) []byte {
 	data.WriteByte(0x00) // empty description
 	data.Write(image)
 
-	frameData := data.Bytes()
-	frame := make([]byte, 10+len(frameData))
-	copy(frame[0:4], "APIC")
-	binary.BigEndian.PutUint32(frame[4:8], uint32(len(frameData)))
-	copy(frame[10:], frameData)
-	return frame
+	return id3BuildFrame(major, "APIC", data.Bytes())
+}
+
+func id3v22PictureFormat(mime string) string {
+	switch mime {
+	case "image/jpeg":
+		return "JPG"
+	case "image/png":
+		return "PNG"
+	case "image/gif":
+		return "GIF"
+	case "image/bmp":
+		return "BMP"
+	default:
+		return "XXX"
+	}
 }
 
 func embedCoverFLAC(audio, image []byte) ([]byte, error) {

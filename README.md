@@ -161,10 +161,11 @@ unlock-music-go -i <文件.mp3|flac|ogg> -dump-tags
 
 | 音频格式 | 写入位置 |
 |---|---|
-| MP3 | ID3v2.3 `USLT` |
-| FLAC / OGG | Vorbis Comment `LYRICS` |
+| MP3 | 保留原 ID3v2 主版本：v2.2 `ULT`，v2.3 / v2.4 `USLT` |
+| FLAC | Vorbis Comment `LYRICS` |
+| OGG（Vorbis / Opus） | Vorbis Comment `LYRICS` |
 
-歌词输入自动识别 UTF-8、UTF-16 LE/BE、GBK、GB18030。NCM 解密得到的封面会写入 MP3（`APIC`）、FLAC（`PICTURE`）、OGG（`METADATA_BLOCK_PICTURE`）。
+歌词输入自动识别 UTF-8、UTF-16 LE/BE、GBK、GB18030，并正确处理 UTF-16 代理对。MP3 标签会校验扩展头、footer、同步安全长度与帧边界；FLAC 会校验完整 metadata 链；OGG 会按 logical stream 重组 Vorbis / Opus comment packet，支持与其他流交错的页面。NCM 解密得到的封面会写入 MP3（`APIC` / v2.2 `PIC`）、FLAC（`PICTURE`）、OGG（`METADATA_BLOCK_PICTURE`）。
 
 ## 项目架构
 

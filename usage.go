@@ -7,12 +7,13 @@ import (
 )
 
 func usage() {
-	fmt.Fprint(os.Stderr, `unlock-music-go（Windows）—— 批量解密音乐文件并可选写入歌词
+	fmt.Fprint(os.Stderr, `unlock-music-go（Windows / macOS）—— 批量解密音乐文件并可选写入歌词
 
 用法
   解密模式（默认）：
   unlock-music-go -i <文件或目录> [-o <输出目录>] [-with-lyrics=<true|false>] [-lrc-pattern <正则>]
-                  [-qqmusic-mmkv <Checkccae.dat>]
+                  [-qqmusic-mmkv <Checkccae.dat>] [-qqmusic-mac-data <QQMusicMac Application Support目录>]
+                  [-qqmusic-ekey <EKey>]
 
   写入歌词模式：
     unlock-music-go -i <文件或目录> -embed-lyrics [-o <输出目录>] [-lrc-pattern <正则>]
@@ -53,15 +54,21 @@ func usage() {
   在 -embed-lyrics 模式下且未指定 -o：会直接覆盖原文件
 
 新版 QQ 音乐 desktop 下载（musicex）
-  新版 .mflac / .mgg / .mmp4 文件会自动从 musicex 尾部识别。其 ekey 存在
-  QQMusic 的 Checkccae.dat 中。程序以纯 Go 读取当前 Windows 机器的 PCI 网卡
-  MAC、系统盘序列号、型号和固件版本来生成 MMKV key；无需 QQ Music 安装目录
-  或 CommonFunction.dll。默认缓存路径是 %APPDATA%\Tencent\QQMusic\Checkccae.dat，
-  非默认位置用 -qqmusic-mmkv 指定。缓存应来自下载该文件的同一台机器；旧版 QMC
-  文件继续使用原有的尾部密钥流程。
+  新版 .mflac / .mgg / .mmp4 文件会自动从 musicex 尾部识别。
+  Windows：程序读取本机 %APPDATA%\Tencent\QQMusic\Checkccae.dat，并从 PCI 网卡
+  MAC、首个可读取物理磁盘的序列号、型号和固件生成 MMKV key；非默认路径用 -qqmusic-mmkv。
+  macOS：程序读取 QQMusicMac 容器中的 OpenUDID 和 iData 内的 EKey MMKV；默认
+  Application Support 目录是 ~/Library/Containers/com.tencent.QQMusicMac/Data/Library/Application Support/QQMusicMac，
+  非默认目录用 -qqmusic-mac-data。MMKV 的索引键是源加密文件的完整绝对路径。
+  -qqmusic-ekey 可直接指定一条 EKey 以跳过本地缓存解析。旧版 QMC 文件继续使用
+  原有的尾部密钥流程。
 
 示例
   unlock-music-go -i song.mflac
+
+  # macOS：自动读取本机 QQMusicMac 容器
+  unlock-music-go -i ~/Library/Containers/com.tencent.QQMusicMac/Data/Library/Application\ Support/QQMusicMac/iQmc/song.mflac
+
   unlock-music-go -i ./Music -o ./output
   unlock-music-go -i ./Music -lrc-pattern "{name}.*\.lrc"
   unlock-music-go -i ./Music -with-lyrics=false

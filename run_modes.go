@@ -47,7 +47,9 @@ func processDecryptFile(task fileTask, outputDir, lrcPattern string, withLyrics 
 	}
 
 	ext := strings.ToLower(strings.TrimPrefix(filepath.Ext(task.srcPath), "."))
-	audio, outExt, err := decryptFile(data, ext, qqMusicOptions)
+	fileOptions := qqMusicOptions
+	fileOptions.FilePath = task.srcPath
+	audio, outExt, err := decryptFile(data, ext, fileOptions)
 	if err != nil {
 		r.decryptErr = err
 		return r

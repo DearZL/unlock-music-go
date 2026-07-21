@@ -191,6 +191,18 @@ go build -o unlock-music-go .
 
 Windows 构建产物为 `unlock-music-go.exe`；macOS 构建产物为 `unlock-music-go`。
 
+## 自动发布
+
+推送任意 Git tag 会触发 [`.github/workflows/release.yml`](.github/workflows/release.yml)：先在 Linux、macOS 与 Windows 运行 `go test ./...` 和 `go vet ./...`，随后自动创建或更新同名 GitHub Release。
+
+Release 附带以下文件，并包含 `README.md`、`LICENSE` 与 `checksums.txt`（SHA-256）：
+
+- `unlock-music-go_<tag>_macos_amd64.tar.gz`
+- `unlock-music-go_<tag>_macos_arm64.tar.gz`
+- `unlock-music-go_<tag>_windows_amd64.zip`
+
+对于在工作流加入前已经推送的 tag，可在 GitHub Actions 中手动运行 **Release**，填入已有 tag 名称后补发 Release。
+
 ## 使用
 
 ```powershell
